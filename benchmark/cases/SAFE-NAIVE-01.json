@@ -1,0 +1,15 @@
+{
+  "id": "SAFE-NAIVE-01",
+  "family": "single delivery no retry",
+  "strategy": "naive_retry",
+  "crashes": [],
+  "redeliveries": 1,
+  "ack_loss": false,
+  "concurrent_recovery": 1,
+  "dedupe_ttl": 100,
+  "retry_delay": 1,
+  "stale_retry_delay": null,
+  "expected_safe": true,
+  "expect_effects": 1,
+  "notes": ""
+}

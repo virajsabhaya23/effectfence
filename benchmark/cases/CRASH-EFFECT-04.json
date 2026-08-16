@@ -1,0 +1,17 @@
+{
+  "id": "CRASH-EFFECT-04",
+  "family": "crash-after-effect-before-progress",
+  "strategy": "effectfence",
+  "crashes": [
+    "after_effect"
+  ],
+  "redeliveries": 2,
+  "ack_loss": false,
+  "concurrent_recovery": 1,
+  "dedupe_ttl": 100,
+  "retry_delay": 1,
+  "stale_retry_delay": null,
+  "expected_safe": false,
+  "expect_effects": 1,
+  "notes": ""
+}

@@ -1,0 +1,31 @@
+{
+  "idea_id": "OC-011",
+  "research_date": "2026-08-16",
+  "sources": [
+    {
+      "name": "Kafka consumer processing guarantees",
+      "url": "https://kafka.apache.org/25/javadoc/org/apache/kafka/clients/consumer/KafkaConsumer.html",
+      "role": "crash-after-processing-before-position-commit failure model"
+    },
+    {
+      "name": "Amazon SQS at-least-once delivery",
+      "url": "https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/standard-queues-at-least-once-delivery.html",
+      "role": "redelivery/idempotency requirement"
+    },
+    {
+      "name": "Debezium Outbox Event Router",
+      "url": "https://debezium.io/documentation/reference/stable/transformations/outbox-event-router.html",
+      "role": "outbox incumbent and event-id dedupe evidence"
+    },
+    {
+      "name": "Machine-Checked Dual-Write Recovery",
+      "url": "https://arxiv.org/abs/2608.00501",
+      "role": "formal fencing/evidence-lifetime prior art"
+    },
+    {
+      "name": "public-apis/public-apis",
+      "url": "https://github.com/public-apis/public-apis",
+      "role": "required public/free API inventory; no external API required by default verifier"
+    }
+  ]
+}

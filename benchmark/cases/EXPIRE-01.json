@@ -1,0 +1,17 @@
+{
+  "id": "EXPIRE-01",
+  "family": "dedupe-window-expiry",
+  "strategy": "effectfence",
+  "crashes": [
+    "after_effect"
+  ],
+  "redeliveries": 1,
+  "ack_loss": false,
+  "concurrent_recovery": 1,
+  "dedupe_ttl": 2,
+  "retry_delay": 1,
+  "stale_retry_delay": 5,
+  "expected_safe": false,
+  "expect_effects": 1,
+  "notes": ""
+}

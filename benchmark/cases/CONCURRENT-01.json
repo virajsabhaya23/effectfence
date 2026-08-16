@@ -1,0 +1,17 @@
+{
+  "id": "CONCURRENT-01",
+  "family": "concurrent-recovery",
+  "strategy": "effectfence",
+  "crashes": [
+    "after_effect"
+  ],
+  "redeliveries": 1,
+  "ack_loss": false,
+  "concurrent_recovery": 2,
+  "dedupe_ttl": 100,
+  "retry_delay": 1,
+  "stale_retry_delay": null,
+  "expected_safe": false,
+  "expect_effects": 1,
+  "notes": ""
+}

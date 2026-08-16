@@ -1,0 +1,216 @@
+{
+  "name": "EffectFence crash/retry safety corpus v0.2",
+  "methodology": "20 unsafe handler/schedule pairs across naive retry, application-side idempotency, transactional outbox relay and finite-evidence failure modes, plus 10 safe controls. The schedule verifier is compared against the same handler under an ordinary one-shot happy-path test.",
+  "cases": [
+    {
+      "id": "NAIVE-CRASH-01",
+      "family": "crash-after-effect-before-progress",
+      "unsafe": true,
+      "source": "https://kafka.apache.org/25/javadoc/org/apache/kafka/clients/consumer/KafkaConsumer.html",
+      "file": "cases/NAIVE-CRASH-01.json"
+    },
+    {
+      "id": "NAIVE-CRASH-02",
+      "family": "crash-after-effect-before-progress",
+      "unsafe": true,
+      "source": "https://kafka.apache.org/25/javadoc/org/apache/kafka/clients/consumer/KafkaConsumer.html",
+      "file": "cases/NAIVE-CRASH-02.json"
+    },
+    {
+      "id": "NAIVE-CRASH-03",
+      "family": "crash-after-effect-before-progress",
+      "unsafe": true,
+      "source": "https://kafka.apache.org/25/javadoc/org/apache/kafka/clients/consumer/KafkaConsumer.html",
+      "file": "cases/NAIVE-CRASH-03.json"
+    },
+    {
+      "id": "NAIVE-CRASH-04",
+      "family": "crash-after-effect-before-progress",
+      "unsafe": true,
+      "source": "https://kafka.apache.org/25/javadoc/org/apache/kafka/clients/consumer/KafkaConsumer.html",
+      "file": "cases/NAIVE-CRASH-04.json"
+    },
+    {
+      "id": "IDEM-CRASH-01",
+      "family": "idempotency-record-after-effect crash window",
+      "unsafe": true,
+      "source": "https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/standard-queues-at-least-once-delivery.html",
+      "file": "cases/IDEM-CRASH-01.json"
+    },
+    {
+      "id": "IDEM-CRASH-02",
+      "family": "idempotency-record-after-effect crash window",
+      "unsafe": true,
+      "source": "https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/standard-queues-at-least-once-delivery.html",
+      "file": "cases/IDEM-CRASH-02.json"
+    },
+    {
+      "id": "IDEM-CRASH-03",
+      "family": "idempotency-record-after-effect crash window",
+      "unsafe": true,
+      "source": "https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/standard-queues-at-least-once-delivery.html",
+      "file": "cases/IDEM-CRASH-03.json"
+    },
+    {
+      "id": "IDEM-CRASH-04",
+      "family": "idempotency-record-after-effect crash window",
+      "unsafe": true,
+      "source": "https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/standard-queues-at-least-once-delivery.html",
+      "file": "cases/IDEM-CRASH-04.json"
+    },
+    {
+      "id": "OUTBOX-CRASH-01",
+      "family": "outbox relay crash after external acceptance",
+      "unsafe": true,
+      "source": "https://debezium.io/documentation/reference/stable/transformations/outbox-event-router.html",
+      "file": "cases/OUTBOX-CRASH-01.json"
+    },
+    {
+      "id": "OUTBOX-CRASH-02",
+      "family": "outbox relay crash after external acceptance",
+      "unsafe": true,
+      "source": "https://debezium.io/documentation/reference/stable/transformations/outbox-event-router.html",
+      "file": "cases/OUTBOX-CRASH-02.json"
+    },
+    {
+      "id": "OUTBOX-CRASH-03",
+      "family": "outbox relay crash after external acceptance",
+      "unsafe": true,
+      "source": "https://debezium.io/documentation/reference/stable/transformations/outbox-event-router.html",
+      "file": "cases/OUTBOX-CRASH-03.json"
+    },
+    {
+      "id": "OUTBOX-CRASH-04",
+      "family": "outbox relay crash after external acceptance",
+      "unsafe": true,
+      "source": "https://debezium.io/documentation/reference/stable/transformations/outbox-event-router.html",
+      "file": "cases/OUTBOX-CRASH-04.json"
+    },
+    {
+      "id": "IDEM-EXPIRE-01",
+      "family": "finite idempotency evidence expiry",
+      "unsafe": true,
+      "source": "https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/standard-queues-at-least-once-delivery.html",
+      "file": "cases/IDEM-EXPIRE-01.json"
+    },
+    {
+      "id": "IDEM-EXPIRE-02",
+      "family": "finite idempotency evidence expiry",
+      "unsafe": true,
+      "source": "https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/standard-queues-at-least-once-delivery.html",
+      "file": "cases/IDEM-EXPIRE-02.json"
+    },
+    {
+      "id": "IDEM-EXPIRE-03",
+      "family": "finite idempotency evidence expiry",
+      "unsafe": true,
+      "source": "https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/standard-queues-at-least-once-delivery.html",
+      "file": "cases/IDEM-EXPIRE-03.json"
+    },
+    {
+      "id": "IDEM-EXPIRE-04",
+      "family": "finite idempotency evidence expiry",
+      "unsafe": true,
+      "source": "https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/standard-queues-at-least-once-delivery.html",
+      "file": "cases/IDEM-EXPIRE-04.json"
+    },
+    {
+      "id": "NAIVE-ACKLOSS-01",
+      "family": "lost acknowledgement redelivery",
+      "unsafe": true,
+      "source": "https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/standard-queues-at-least-once-delivery.html",
+      "file": "cases/NAIVE-ACKLOSS-01.json"
+    },
+    {
+      "id": "NAIVE-ACKLOSS-02",
+      "family": "lost acknowledgement redelivery",
+      "unsafe": true,
+      "source": "https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/standard-queues-at-least-once-delivery.html",
+      "file": "cases/NAIVE-ACKLOSS-02.json"
+    },
+    {
+      "id": "NAIVE-ACKLOSS-03",
+      "family": "lost acknowledgement redelivery",
+      "unsafe": true,
+      "source": "https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/standard-queues-at-least-once-delivery.html",
+      "file": "cases/NAIVE-ACKLOSS-03.json"
+    },
+    {
+      "id": "NAIVE-ACKLOSS-04",
+      "family": "lost acknowledgement redelivery",
+      "unsafe": true,
+      "source": "https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/standard-queues-at-least-once-delivery.html",
+      "file": "cases/NAIVE-ACKLOSS-04.json"
+    },
+    {
+      "id": "SAFE-FENCE-01",
+      "family": "sink-evidence plus fencing",
+      "unsafe": false,
+      "source": "https://arxiv.org/abs/2608.00501",
+      "file": "cases/SAFE-FENCE-01.json"
+    },
+    {
+      "id": "SAFE-FENCE-02",
+      "family": "sink-evidence plus fencing",
+      "unsafe": false,
+      "source": "https://arxiv.org/abs/2608.00501",
+      "file": "cases/SAFE-FENCE-02.json"
+    },
+    {
+      "id": "SAFE-FENCE-03",
+      "family": "sink-evidence plus fencing",
+      "unsafe": false,
+      "source": "https://arxiv.org/abs/2608.00501",
+      "file": "cases/SAFE-FENCE-03.json"
+    },
+    {
+      "id": "SAFE-FENCE-04",
+      "family": "sink-evidence plus fencing",
+      "unsafe": false,
+      "source": "https://arxiv.org/abs/2608.00501",
+      "file": "cases/SAFE-FENCE-04.json"
+    },
+    {
+      "id": "SAFE-IDEM-01",
+      "family": "idempotency within evidence lifetime",
+      "unsafe": false,
+      "source": "https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/standard-queues-at-least-once-delivery.html",
+      "file": "cases/SAFE-IDEM-01.json"
+    },
+    {
+      "id": "SAFE-IDEM-02",
+      "family": "idempotency within evidence lifetime",
+      "unsafe": false,
+      "source": "https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/standard-queues-at-least-once-delivery.html",
+      "file": "cases/SAFE-IDEM-02.json"
+    },
+    {
+      "id": "SAFE-OUTBOX-01",
+      "family": "outbox normal relay",
+      "unsafe": false,
+      "source": "https://debezium.io/documentation/reference/stable/transformations/outbox-event-router.html",
+      "file": "cases/SAFE-OUTBOX-01.json"
+    },
+    {
+      "id": "SAFE-OUTBOX-02",
+      "family": "outbox normal relay",
+      "unsafe": false,
+      "source": "https://debezium.io/documentation/reference/stable/transformations/outbox-event-router.html",
+      "file": "cases/SAFE-OUTBOX-02.json"
+    },
+    {
+      "id": "SAFE-NAIVE-01",
+      "family": "single delivery no retry",
+      "unsafe": false,
+      "source": "https://kafka.apache.org/25/javadoc/org/apache/kafka/clients/consumer/KafkaConsumer.html",
+      "file": "cases/SAFE-NAIVE-01.json"
+    },
+    {
+      "id": "SAFE-NAIVE-02",
+      "family": "single delivery no retry",
+      "unsafe": false,
+      "source": "https://kafka.apache.org/25/javadoc/org/apache/kafka/clients/consumer/KafkaConsumer.html",
+      "file": "cases/SAFE-NAIVE-02.json"
+    }
+  ]
+}

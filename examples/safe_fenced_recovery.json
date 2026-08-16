@@ -1,0 +1,17 @@
+{
+  "id": "SAFE-FENCE-01",
+  "family": "sink-evidence plus fencing",
+  "strategy": "effectfence",
+  "crashes": [
+    "after_effect"
+  ],
+  "redeliveries": 2,
+  "ack_loss": false,
+  "concurrent_recovery": 2,
+  "dedupe_ttl": 100,
+  "retry_delay": 1,
+  "stale_retry_delay": null,
+  "expected_safe": true,
+  "expect_effects": 1,
+  "notes": ""
+}

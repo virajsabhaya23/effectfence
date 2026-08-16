@@ -1,0 +1,15 @@
+{
+  "id": "SAFE-OUTBOX-02",
+  "family": "outbox normal relay",
+  "strategy": "transactional_outbox",
+  "crashes": [],
+  "redeliveries": 1,
+  "ack_loss": false,
+  "concurrent_recovery": 1,
+  "dedupe_ttl": 100,
+  "retry_delay": 1,
+  "stale_retry_delay": null,
+  "expected_safe": true,
+  "expect_effects": 1,
+  "notes": ""
+}

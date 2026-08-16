@@ -1,0 +1,375 @@
+{
+  "by_strategy": {
+    "effectfence": {
+      "safe_cases": 4,
+      "safe_flagged": 0,
+      "unsafe_cases": 0,
+      "unsafe_detected": 0
+    },
+    "idempotency_key": {
+      "safe_cases": 2,
+      "safe_flagged": 0,
+      "unsafe_cases": 8,
+      "unsafe_detected": 8
+    },
+    "naive_retry": {
+      "safe_cases": 2,
+      "safe_flagged": 0,
+      "unsafe_cases": 8,
+      "unsafe_detected": 8
+    },
+    "transactional_outbox": {
+      "safe_cases": 2,
+      "safe_flagged": 0,
+      "unsafe_cases": 4,
+      "unsafe_detected": 4
+    }
+  },
+  "cases": 30,
+  "name": "EffectFence crash/retry safety corpus v0.2",
+  "ordinary_happy_path": {
+    "fp": 0,
+    "recall": 0.0,
+    "tp": 0
+  },
+  "rows": [
+    {
+      "accepted_effects": 2,
+      "certificate_sha256": "050be2e49b11f5d39232c669b03de5ea4d0ba1fb391ca99d5c4b6c07e43d576b",
+      "family": "crash-after-effect-before-progress",
+      "id": "NAIVE-CRASH-01",
+      "ordinary_happy_path_detected": false,
+      "schedule_verifier_detected": true,
+      "source": "https://kafka.apache.org/25/javadoc/org/apache/kafka/clients/consumer/KafkaConsumer.html",
+      "strategy": "naive_retry",
+      "unsafe_expected": true
+    },
+    {
+      "accepted_effects": 2,
+      "certificate_sha256": "c14dc0bbdf7ebfaf79305a7be2e4441bc914e6c362c6a41a8ae08015e7951e2a",
+      "family": "crash-after-effect-before-progress",
+      "id": "NAIVE-CRASH-02",
+      "ordinary_happy_path_detected": false,
+      "schedule_verifier_detected": true,
+      "source": "https://kafka.apache.org/25/javadoc/org/apache/kafka/clients/consumer/KafkaConsumer.html",
+      "strategy": "naive_retry",
+      "unsafe_expected": true
+    },
+    {
+      "accepted_effects": 2,
+      "certificate_sha256": "db95058c7d388624d6111884d10348a38336ab478b5144723d0d031f5642a707",
+      "family": "crash-after-effect-before-progress",
+      "id": "NAIVE-CRASH-03",
+      "ordinary_happy_path_detected": false,
+      "schedule_verifier_detected": true,
+      "source": "https://kafka.apache.org/25/javadoc/org/apache/kafka/clients/consumer/KafkaConsumer.html",
+      "strategy": "naive_retry",
+      "unsafe_expected": true
+    },
+    {
+      "accepted_effects": 2,
+      "certificate_sha256": "99b3892014fab0a76e755bdfaaa43184eb5d61b3324077e37a79323e03d7021c",
+      "family": "crash-after-effect-before-progress",
+      "id": "NAIVE-CRASH-04",
+      "ordinary_happy_path_detected": false,
+      "schedule_verifier_detected": true,
+      "source": "https://kafka.apache.org/25/javadoc/org/apache/kafka/clients/consumer/KafkaConsumer.html",
+      "strategy": "naive_retry",
+      "unsafe_expected": true
+    },
+    {
+      "accepted_effects": 2,
+      "certificate_sha256": "caa41bf39c1da73b7b820839884798f1662d26fa42ff72f2054fe26476366207",
+      "family": "idempotency-record-after-effect crash window",
+      "id": "IDEM-CRASH-01",
+      "ordinary_happy_path_detected": false,
+      "schedule_verifier_detected": true,
+      "source": "https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/standard-queues-at-least-once-delivery.html",
+      "strategy": "idempotency_key",
+      "unsafe_expected": true
+    },
+    {
+      "accepted_effects": 2,
+      "certificate_sha256": "d44bab566b8705e0b7fce502de87c6cb1b1e380e03c4ee7ff52333e3a248873e",
+      "family": "idempotency-record-after-effect crash window",
+      "id": "IDEM-CRASH-02",
+      "ordinary_happy_path_detected": false,
+      "schedule_verifier_detected": true,
+      "source": "https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/standard-queues-at-least-once-delivery.html",
+      "strategy": "idempotency_key",
+      "unsafe_expected": true
+    },
+    {
+      "accepted_effects": 2,
+      "certificate_sha256": "32873b0df5f68f8a7bdff667de3b1d18f0f02bef310e7591ad323203ab200dff",
+      "family": "idempotency-record-after-effect crash window",
+      "id": "IDEM-CRASH-03",
+      "ordinary_happy_path_detected": false,
+      "schedule_verifier_detected": true,
+      "source": "https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/standard-queues-at-least-once-delivery.html",
+      "strategy": "idempotency_key",
+      "unsafe_expected": true
+    },
+    {
+      "accepted_effects": 2,
+      "certificate_sha256": "c89f368590e7d7de1d6b120ecf105e1fb271737c7986fca196b842515c5b9ae4",
+      "family": "idempotency-record-after-effect crash window",
+      "id": "IDEM-CRASH-04",
+      "ordinary_happy_path_detected": false,
+      "schedule_verifier_detected": true,
+      "source": "https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/standard-queues-at-least-once-delivery.html",
+      "strategy": "idempotency_key",
+      "unsafe_expected": true
+    },
+    {
+      "accepted_effects": 2,
+      "certificate_sha256": "b3119332c1e54b343a06c0157713b195010487d2ed0b720dd4ebdebf438cb59d",
+      "family": "outbox relay crash after external acceptance",
+      "id": "OUTBOX-CRASH-01",
+      "ordinary_happy_path_detected": false,
+      "schedule_verifier_detected": true,
+      "source": "https://debezium.io/documentation/reference/stable/transformations/outbox-event-router.html",
+      "strategy": "transactional_outbox",
+      "unsafe_expected": true
+    },
+    {
+      "accepted_effects": 2,
+      "certificate_sha256": "32d8d63172c6504cf8d38e90db1866f5ad8251864a636b5a99c1c1652875f3b4",
+      "family": "outbox relay crash after external acceptance",
+      "id": "OUTBOX-CRASH-02",
+      "ordinary_happy_path_detected": false,
+      "schedule_verifier_detected": true,
+      "source": "https://debezium.io/documentation/reference/stable/transformations/outbox-event-router.html",
+      "strategy": "transactional_outbox",
+      "unsafe_expected": true
+    },
+    {
+      "accepted_effects": 2,
+      "certificate_sha256": "f46f07e72220ebf9d939a3d6631ff228db87ece726dee34aa2ab9dd9a3975bda",
+      "family": "outbox relay crash after external acceptance",
+      "id": "OUTBOX-CRASH-03",
+      "ordinary_happy_path_detected": false,
+      "schedule_verifier_detected": true,
+      "source": "https://debezium.io/documentation/reference/stable/transformations/outbox-event-router.html",
+      "strategy": "transactional_outbox",
+      "unsafe_expected": true
+    },
+    {
+      "accepted_effects": 2,
+      "certificate_sha256": "45b755aa626026e0967b34416ec33ede3b0da317a65bf3794fa4865ed809acfc",
+      "family": "outbox relay crash after external acceptance",
+      "id": "OUTBOX-CRASH-04",
+      "ordinary_happy_path_detected": false,
+      "schedule_verifier_detected": true,
+      "source": "https://debezium.io/documentation/reference/stable/transformations/outbox-event-router.html",
+      "strategy": "transactional_outbox",
+      "unsafe_expected": true
+    },
+    {
+      "accepted_effects": 2,
+      "certificate_sha256": "c7334c4b351356ebb18946a421814e6ee467bc6e2fbb63820bae96dbd4a85cba",
+      "family": "finite idempotency evidence expiry",
+      "id": "IDEM-EXPIRE-01",
+      "ordinary_happy_path_detected": false,
+      "schedule_verifier_detected": true,
+      "source": "https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/standard-queues-at-least-once-delivery.html",
+      "strategy": "idempotency_key",
+      "unsafe_expected": true
+    },
+    {
+      "accepted_effects": 2,
+      "certificate_sha256": "69ea2a4fa23e40751e35fe92c966c662a6ed9d32d0b51a620edf497de4a359a6",
+      "family": "finite idempotency evidence expiry",
+      "id": "IDEM-EXPIRE-02",
+      "ordinary_happy_path_detected": false,
+      "schedule_verifier_detected": true,
+      "source": "https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/standard-queues-at-least-once-delivery.html",
+      "strategy": "idempotency_key",
+      "unsafe_expected": true
+    },
+    {
+      "accepted_effects": 2,
+      "certificate_sha256": "3e12512fd4ceffec58031fa3b84ac0ab3110773ad3876500a9d3dd97a3af9995",
+      "family": "finite idempotency evidence expiry",
+      "id": "IDEM-EXPIRE-03",
+      "ordinary_happy_path_detected": false,
+      "schedule_verifier_detected": true,
+      "source": "https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/standard-queues-at-least-once-delivery.html",
+      "strategy": "idempotency_key",
+      "unsafe_expected": true
+    },
+    {
+      "accepted_effects": 2,
+      "certificate_sha256": "945d6a21588e21f4e21525b67fefa250eb5338d6dd105baa6c897555e524efb0",
+      "family": "finite idempotency evidence expiry",
+      "id": "IDEM-EXPIRE-04",
+      "ordinary_happy_path_detected": false,
+      "schedule_verifier_detected": true,
+      "source": "https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/standard-queues-at-least-once-delivery.html",
+      "strategy": "idempotency_key",
+      "unsafe_expected": true
+    },
+    {
+      "accepted_effects": 2,
+      "certificate_sha256": "185b2a2d3f835a58017cc1cdf5a0f4e7830368fcdc336691624b2f19d5000e62",
+      "family": "lost acknowledgement redelivery",
+      "id": "NAIVE-ACKLOSS-01",
+      "ordinary_happy_path_detected": false,
+      "schedule_verifier_detected": true,
+      "source": "https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/standard-queues-at-least-once-delivery.html",
+      "strategy": "naive_retry",
+      "unsafe_expected": true
+    },
+    {
+      "accepted_effects": 2,
+      "certificate_sha256": "c6c5fb7127f0d52e8d2bf7875820bd14434bc6ff54c24b95f03a373f04bdffd8",
+      "family": "lost acknowledgement redelivery",
+      "id": "NAIVE-ACKLOSS-02",
+      "ordinary_happy_path_detected": false,
+      "schedule_verifier_detected": true,
+      "source": "https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/standard-queues-at-least-once-delivery.html",
+      "strategy": "naive_retry",
+      "unsafe_expected": true
+    },
+    {
+      "accepted_effects": 2,
+      "certificate_sha256": "250a4fac1986baca373d79e9aa29593dea275de7794c400ebd09bc24d5fe9e7b",
+      "family": "lost acknowledgement redelivery",
+      "id": "NAIVE-ACKLOSS-03",
+      "ordinary_happy_path_detected": false,
+      "schedule_verifier_detected": true,
+      "source": "https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/standard-queues-at-least-once-delivery.html",
+      "strategy": "naive_retry",
+      "unsafe_expected": true
+    },
+    {
+      "accepted_effects": 2,
+      "certificate_sha256": "4536fca3d4f1a381236ba54a7571a5a3caf08d8730cece227026f7260863f53b",
+      "family": "lost acknowledgement redelivery",
+      "id": "NAIVE-ACKLOSS-04",
+      "ordinary_happy_path_detected": false,
+      "schedule_verifier_detected": true,
+      "source": "https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/standard-queues-at-least-once-delivery.html",
+      "strategy": "naive_retry",
+      "unsafe_expected": true
+    },
+    {
+      "accepted_effects": 1,
+      "certificate_sha256": "410b347bbecce46697fd70fd6582eca25d9d23dcf3a7cd8f1cc619f3b243c1c1",
+      "family": "sink-evidence plus fencing",
+      "id": "SAFE-FENCE-01",
+      "ordinary_happy_path_detected": false,
+      "schedule_verifier_detected": false,
+      "source": "https://arxiv.org/abs/2608.00501",
+      "strategy": "effectfence",
+      "unsafe_expected": false
+    },
+    {
+      "accepted_effects": 1,
+      "certificate_sha256": "14a5cc1cac9690b343d554a1267587ad3564908af3cd8cd39e1377b85115937b",
+      "family": "sink-evidence plus fencing",
+      "id": "SAFE-FENCE-02",
+      "ordinary_happy_path_detected": false,
+      "schedule_verifier_detected": false,
+      "source": "https://arxiv.org/abs/2608.00501",
+      "strategy": "effectfence",
+      "unsafe_expected": false
+    },
+    {
+      "accepted_effects": 1,
+      "certificate_sha256": "8c879e2bfa78e0c0126bd3675655bc45a6e2409607cfd26a21c7ec1b3164fe04",
+      "family": "sink-evidence plus fencing",
+      "id": "SAFE-FENCE-03",
+      "ordinary_happy_path_detected": false,
+      "schedule_verifier_detected": false,
+      "source": "https://arxiv.org/abs/2608.00501",
+      "strategy": "effectfence",
+      "unsafe_expected": false
+    },
+    {
+      "accepted_effects": 1,
+      "certificate_sha256": "786bfb586179349b74885a8406a8bd07e9747531d8e5f658e63e51302c2ca430",
+      "family": "sink-evidence plus fencing",
+      "id": "SAFE-FENCE-04",
+      "ordinary_happy_path_detected": false,
+      "schedule_verifier_detected": false,
+      "source": "https://arxiv.org/abs/2608.00501",
+      "strategy": "effectfence",
+      "unsafe_expected": false
+    },
+    {
+      "accepted_effects": 1,
+      "certificate_sha256": "328c76c441f3b47d2371cf358ceb3e30070663011f63d38e1c4c8121f3c2b9c0",
+      "family": "idempotency within evidence lifetime",
+      "id": "SAFE-IDEM-01",
+      "ordinary_happy_path_detected": false,
+      "schedule_verifier_detected": false,
+      "source": "https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/standard-queues-at-least-once-delivery.html",
+      "strategy": "idempotency_key",
+      "unsafe_expected": false
+    },
+    {
+      "accepted_effects": 1,
+      "certificate_sha256": "f0264780b008768f7f2cfc3111f53483143b4af33b3751e3629c2fd866d77c38",
+      "family": "idempotency within evidence lifetime",
+      "id": "SAFE-IDEM-02",
+      "ordinary_happy_path_detected": false,
+      "schedule_verifier_detected": false,
+      "source": "https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/standard-queues-at-least-once-delivery.html",
+      "strategy": "idempotency_key",
+      "unsafe_expected": false
+    },
+    {
+      "accepted_effects": 1,
+      "certificate_sha256": "893e5d2db5905aedc336aa92a5beb67005a3c38fb90886fccb7601f6c1abc36c",
+      "family": "outbox normal relay",
+      "id": "SAFE-OUTBOX-01",
+      "ordinary_happy_path_detected": false,
+      "schedule_verifier_detected": false,
+      "source": "https://debezium.io/documentation/reference/stable/transformations/outbox-event-router.html",
+      "strategy": "transactional_outbox",
+      "unsafe_expected": false
+    },
+    {
+      "accepted_effects": 1,
+      "certificate_sha256": "a7b1a7c0807979997d42ba86e953c03fa3ffcca8bd84cf57d9b2e6f916229977",
+      "family": "outbox normal relay",
+      "id": "SAFE-OUTBOX-02",
+      "ordinary_happy_path_detected": false,
+      "schedule_verifier_detected": false,
+      "source": "https://debezium.io/documentation/reference/stable/transformations/outbox-event-router.html",
+      "strategy": "transactional_outbox",
+      "unsafe_expected": false
+    },
+    {
+      "accepted_effects": 1,
+      "certificate_sha256": "07a7b5bf78be60d4a1879f89dc8cfe899a41fe9f3a6889210813843434f86b3b",
+      "family": "single delivery no retry",
+      "id": "SAFE-NAIVE-01",
+      "ordinary_happy_path_detected": false,
+      "schedule_verifier_detected": false,
+      "source": "https://kafka.apache.org/25/javadoc/org/apache/kafka/clients/consumer/KafkaConsumer.html",
+      "strategy": "naive_retry",
+      "unsafe_expected": false
+    },
+    {
+      "accepted_effects": 1,
+      "certificate_sha256": "a7b0d455a99ae518d0359c396a874d32945aa6965772f35b582c1bdb0b0af44f",
+      "family": "single delivery no retry",
+      "id": "SAFE-NAIVE-02",
+      "ordinary_happy_path_detected": false,
+      "schedule_verifier_detected": false,
+      "source": "https://kafka.apache.org/25/javadoc/org/apache/kafka/clients/consumer/KafkaConsumer.html",
+      "strategy": "naive_retry",
+      "unsafe_expected": false
+    }
+  ],
+  "schedule_verifier": {
+    "fn": 0,
+    "fp": 0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "tn": 10,
+    "tp": 20
+  }
+}
