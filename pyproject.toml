@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "effectfence"
-version = "0.1.0"
+version = "0.1.1"
 description = "Crash/retry side-effect safety verifier"
 readme = "README.md"
 requires-python = ">=3.10"
