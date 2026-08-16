@@ -13,7 +13,7 @@ EffectFence explores those schedules deterministically and verifies the **observ
 Python 3.10+, no runtime dependencies. The repository includes a dependency-free PEP 517 build backend, so installation works offline from a clean virtual environment.
 
 ```bash
-python -m pip install .
+python -m pip install https://github.com/virajsabhaya23/effectfence/releases/download/v0.1.0/effectfence-0.1.0-py3-none-any.whl
 effectfence verify examples/safe_fenced_recovery.json
 effectfence verify examples/crash_after_effect.json --out out/report.json --junit out/report.xml
 effectfence explore examples/crash_after_effect.json --out out/exploration.json
