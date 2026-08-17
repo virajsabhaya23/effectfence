@@ -1,0 +1,33 @@
+{
+  "schemaVersion": "effectfence.mcp.v1",
+  "server": {
+    "transport": "stdio",
+    "command": ["python3", "fixture_server.py"],
+    "cwd": ".",
+    "env": {"EFFECTFENCE_FIXTURE_ROOT": ".effectfence-state"},
+    "protocolVersion": "2025-11-25"
+  },
+  "observers": [
+    {
+      "id": "local-state",
+      "kind": "filesystem",
+      "root": ".effectfence-state",
+      "sensitive": false
+    }
+  ],
+  "cases": [
+    {
+      "id": "read-note-is-read-only",
+      "tool": "read_note",
+      "arguments": {},
+      "setup": {"command": ["python3", "reset_fixture.py", ".effectfence-state"]}
+    },
+    {
+      "id": "upsert-is-idempotent",
+      "tool": "upsert_record",
+      "arguments": {"id": "customer-7", "value": "active"},
+      "setup": {"command": ["python3", "reset_fixture.py", ".effectfence-state"]}
+    }
+  ],
+  "policy": {"minimumToolCoverage": 0.4}
+}

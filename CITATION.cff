@@ -1,10 +1,17 @@
 cff-version: 1.2.0
-title: EffectFence
+title: "EffectFence: Crash/Retry and MCP Side-Effect Conformance Verifier"
 message: "If this software or its benchmark corpus contributes to your work, please cite it."
 type: software
 authors:
   - family-names: Sabhaya
     given-names: Viraj
-version: 0.1.0
+version: 0.2.0
 date-released: 2026-08-16
 license: Apache-2.0
+repository-code: "https://github.com/virajsabhaya23/effectfence"
+keywords:
+  - model-context-protocol
+  - idempotency
+  - side-effects
+  - conformance-testing
+  - crash-recovery

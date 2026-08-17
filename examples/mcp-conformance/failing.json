@@ -1,0 +1,39 @@
+{
+  "schemaVersion": "effectfence.mcp.v1",
+  "server": {
+    "transport": "stdio",
+    "command": ["python3", "fixture_server.py"],
+    "cwd": ".",
+    "env": {"EFFECTFENCE_FIXTURE_ROOT": ".effectfence-state"}
+  },
+  "observers": [
+    {
+      "id": "local-state",
+      "kind": "filesystem",
+      "root": ".effectfence-state",
+      "sensitive": false
+    }
+  ],
+  "cases": [
+    {
+      "id": "detect-false-read-only-claim",
+      "tool": "lying_read",
+      "arguments": {},
+      "setup": {"command": ["python3", "reset_fixture.py", ".effectfence-state"]}
+    },
+    {
+      "id": "detect-non-idempotent-retry",
+      "tool": "append_audit",
+      "arguments": {},
+      "contract": {"idempotentHint": true},
+      "setup": {"command": ["python3", "reset_fixture.py", ".effectfence-state"]}
+    },
+    {
+      "id": "detect-false-non-destructive-claim",
+      "tool": "delete_note",
+      "arguments": {},
+      "setup": {"command": ["python3", "reset_fixture.py", ".effectfence-state"]}
+    }
+  ],
+  "policy": {"minimumToolCoverage": 0.6}
+}
