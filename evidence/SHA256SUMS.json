@@ -2,6 +2,7 @@
   ".env.example": "cb1aeaffa951ed1006fe9179136b075ddbca44b1305d389655228cda1f27eacd",
   ".github/workflows/live-kafka-postgres.yml": "5cac92e509d7574f56c7942008de4dd0442aad55647800ece90ce8e17a2fb6c0",
   ".github/workflows/mcp-conformance.yml": "64fad5745290076ec2956fabdfd4ed83d91408ae34f65a9fa7e531a6ac43e6a8",
+  ".github/workflows/release.yml": "94cfed3d1a49a2b4e8fa27ed93282cd9a9f13344efd680e8ab53bccfe4d3ace7",
   ".github/workflows/test.yml": "19c37013e9963821f64fa19ff372f7e3a932393d14defaae6b2340ee2cd7c8a1",
   ".gitignore": "655ac684a908e5e3aa76f33000d3c60b33be3e912d32b2351157d5666be3ffa8",
   "BUILD_REPORT.md": "a93d62b0a0e6647395b39c1a7736abfaa667417532737730784d9c86f5d5a4be",
