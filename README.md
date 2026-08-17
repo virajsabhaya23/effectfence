@@ -105,6 +105,11 @@ These are executable **reference strategies**, not claims that a particular Kafk
 - dedupe/evidence expiry;
 - outbox relay crash after sink acceptance but before outbox progress update.
 
+Ordinary `redeliveries` are a bounded broker attempt budget. The simulator will
+not invoke a handler again after a durable checkpoint; only an explicit
+progress-loss, concurrent-recovery, or stale-inflight fault can make another
+delivery eligible. Every eligibility decision is preserved in the trace.
+
 ## Adapters
 
 - persistent SQLite effect ledger;

@@ -4,6 +4,12 @@ All notable changes will be documented here. This project follows Semantic Versi
 
 ## Unreleased
 
+- Reworked deterministic broker delivery so a redelivery count is an attempt
+  budget, not a command to invoke a handler after durable progress. Trace
+  evidence now records delivery eligibility, skipped deliveries, explicit
+  progress-loss faults, and the final broker-delivery state.
+- Replays that find durable idempotency or acceptance evidence now checkpoint
+  and acknowledge the message, matching production consumer behavior.
 - Added an MCP stdio conformance runner that negotiates protocol initialization,
   discovers paginated tools, invokes declared cases, and verifies observable
   effects against MCP tool annotations or manifest-owned contracts.

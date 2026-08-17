@@ -49,6 +49,11 @@ class EffectLedger:
         self.db.execute('INSERT OR REPLACE INTO acknowledgements VALUES (?,?)',(mid,now)); self.db.commit()
     def is_acked(self, mid: str) -> bool:
         return self.db.execute('SELECT 1 FROM acknowledgements WHERE message_id=?',(mid,)).fetchone() is not None
+    def lose_broker_progress(self, mid: str):
+        """Model an explicitly injected broker-side loss of durable progress."""
+        self.db.execute('DELETE FROM acknowledgements WHERE message_id=?',(mid,))
+        self.db.execute('DELETE FROM checkpoints WHERE message_id=?',(mid,))
+        self.db.commit()
     def dedupe_valid(self, mid: str, now: int) -> bool:
         row=self.db.execute('SELECT expires_at FROM dedupe WHERE message_id=?',(mid,)).fetchone()
         return bool(row and row[0] >= now)
