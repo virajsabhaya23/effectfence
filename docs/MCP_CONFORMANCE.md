@@ -83,6 +83,28 @@ each declaration source as `mcp-tool-annotation` or `manifest-contract`.
 EffectFence also fails unexpected MCP tool errors, unknown tools, execution
 errors, and tool-coverage policy violations.
 
+### Ambiguous result retries
+
+Set `ambiguousResultFault` on a case to test the failure window where the
+caller cannot rely on receiving a tool result and therefore retries:
+
+```json
+"ambiguousResultFault": {
+  "mode": "drop-result-after-response",
+  "trials": 20,
+  "timeoutMs": 1000
+}
+```
+
+`drop-result-after-response` completes the first MCP call, deliberately discards
+its result at the verifier boundary, snapshots state, and issues the same call
+again. This is a deterministic client-knowledge fault, not packet-level network
+emulation. `timeout-before-send` is the negative control: no first request is
+sent, so only the retry may change state. Each trial is reset independently and
+classified as `committed-result-lost`, `no-effect-timeout`,
+`duplicate-on-retry`, or `ambiguous-unknown`. Duplicates fail the case; unknown
+evidence is explicitly inconclusive and can never produce a passing verdict.
+
 ## Observers
 
 - `filesystem`: hashes regular files, records symlinks without following them,
