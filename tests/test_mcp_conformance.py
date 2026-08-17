@@ -147,7 +147,7 @@ class McpConformanceTests(unittest.TestCase):
                     "tool": "append_audit",
                     "ambiguousResultFault": {
                         "mode": "drop-result-after-response",
-                        "trials": 3,
+                        "trials": 20,
                     },
                 }],
             )
@@ -155,7 +155,7 @@ class McpConformanceTests(unittest.TestCase):
             self.assertFalse(case["passed"])
             self.assertEqual(
                 case["ambiguousResult"]["classifications"],
-                {"duplicate-on-retry": 3},
+                {"duplicate-on-retry": 20},
             )
             self.assertIn(
                 "AMBIGUOUS_RESULT_DUPLICATE_ON_RETRY",
@@ -171,7 +171,7 @@ class McpConformanceTests(unittest.TestCase):
                     "tool": "read_note",
                     "ambiguousResultFault": {
                         "mode": "drop-result-after-response",
-                        "trials": 2,
+                        "trials": 20,
                     },
                 }],
             )
@@ -179,7 +179,7 @@ class McpConformanceTests(unittest.TestCase):
             self.assertFalse(case["passed"])
             self.assertEqual(
                 case["ambiguousResult"]["classifications"],
-                {"ambiguous-unknown": 2},
+                {"ambiguous-unknown": 20},
             )
             self.assertIn(
                 "AMBIGUOUS_RESULT_UNCLASSIFIED",
@@ -196,7 +196,7 @@ class McpConformanceTests(unittest.TestCase):
                     "arguments": {"id": "7", "value": "safe"},
                     "ambiguousResultFault": {
                         "mode": "timeout-before-send",
-                        "trials": 2,
+                        "trials": 20,
                         "timeoutMs": 25,
                     },
                 }],
@@ -205,7 +205,7 @@ class McpConformanceTests(unittest.TestCase):
             self.assertTrue(case["passed"])
             self.assertEqual(
                 case["ambiguousResult"]["classifications"],
-                {"no-effect-timeout": 2},
+                {"no-effect-timeout": 20},
             )
 
     def test_paginated_tool_discovery(self) -> None:
