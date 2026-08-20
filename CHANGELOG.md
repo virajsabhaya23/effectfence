@@ -4,6 +4,17 @@ All notable changes will be documented here. This project follows Semantic Versi
 
 ## Unreleased
 
+- Added an observer non-interference control schedule. Every MCP case (and every
+  ambiguous-result trial) now runs matched no-tool observation rounds using the
+  exact same observer sequence before the tool is invoked. A state transition that
+  reproduces without the tool is reported as
+  `OBSERVER_OR_BACKGROUND_INTERFERENCE`, suppresses annotation-mismatch
+  attribution for that window, and makes the case inconclusive instead of a pass
+  or a false violation. Configure with `observerControlRounds` (default 1; set 0
+  to opt out and forfeit causal attribution evidence).
+- A case now passes only when it has neither violations nor inconclusive
+  evidence, so unresolved checks can no longer be reported as verified.
+
 - Added deterministic MCP ambiguous-result retry schedules with repeated,
   observer-backed classifications for committed results, no-effect timeouts,
   duplicate retries, and explicitly inconclusive outcomes.

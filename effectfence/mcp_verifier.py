@@ -209,6 +209,7 @@ def _run_case(
     }
     selected_ids = case.get("observerIds", list(observers))
     selected = [observers[observer_id] for observer_id in selected_ids]
+    control_rounds = int(case.get("observerControlRounds", 1))
     if "ambiguousResultFault" in case:
         return _run_ambiguous_result_case(
             case,
@@ -219,11 +220,25 @@ def _run_case(
             base=base,
             server_environment=server_environment,
             started=started,
+            control_rounds=control_rounds,
         )
     try:
         if "setup" in case:
             _run_hook(case["setup"], base, server_environment)
-        before = _snapshot_all(selected)
+        before, control = _control_window(selected, control_rounds)
+        public["observerControl"] = control
+        # A state transition reproducible without the tool cannot be blamed on it.
+        unstable_observers = set(control["unstableObservers"])
+        if unstable_observers:
+            public["inconclusive"].append(
+                {
+                    "code": "OBSERVER_OR_BACKGROUND_INTERFERENCE",
+                    "message": (
+                        "observed state changed with no tool call; deltas from these "
+                        f"observers cannot be attributed to the tool: {control['unstableObservers']}"
+                    ),
+                }
+            )
         first_result = client.call_tool(case["tool"], arguments)
         after_first = _snapshot_all(selected)
         first_delta = _diff_all(selected, before, after_first)
@@ -240,7 +255,11 @@ def _run_case(
                 }
             )
 
-        _check_first_call(declarations, first_delta, public)
+        attributable_first = [
+            delta for delta in first_delta
+            if delta.observer_id not in unstable_observers
+        ]
+        _check_first_call(declarations, attributable_first, public)
 
         retry_enabled = bool(case.get("retry", declarations.get("idempotentHint") is True))
         if retry_enabled:
@@ -259,16 +278,19 @@ def _run_case(
                         ),
                     }
                 )
-            if declarations.get("idempotentHint") is True and any(
-                delta.changed for delta in retry_delta
-            ):
+            attributable_retry = [
+                delta for delta in retry_delta
+                if delta.observer_id not in unstable_observers
+            ]
+            if (declarations.get("idempotentHint") is True
+                    and any(delta.changed for delta in attributable_retry)):
                 public["violations"].append(
                     {
                         "code": "IDEMPOTENT_HINT_MISMATCH",
                         "message": "repeating the same call changed observed state again",
                     }
                 )
-            _check_first_call(declarations, retry_delta, public)
+            _check_first_call(declarations, attributable_retry, public)
         elif declarations.get("idempotentHint") is not None:
             public["inconclusive"].append(
                 {
@@ -294,7 +316,7 @@ def _run_case(
                 public["violations"].append(
                     {"code": "CLEANUP_FAILED", "message": _safe_error(error)}
                 )
-    public["passed"] = not public["violations"]
+    public["passed"] = not public["violations"] and not public["inconclusive"]
     return _finish_case(public, started)
 
 
@@ -308,16 +330,21 @@ def _run_ambiguous_result_case(
     base: Path,
     server_environment: dict[str, str],
     started: float,
+    control_rounds: int = 1,
 ) -> dict[str, Any]:
     fault = case["ambiguousResultFault"]
     mode = fault["mode"]
     trials: list[dict[str, Any]] = []
     classifications: dict[str, int] = {}
+    interfering_trials: list[int] = []
     try:
         for trial_number in range(1, int(fault.get("trials", 20)) + 1):
             if "setup" in case:
                 _run_hook(case["setup"], base, server_environment)
-            before = _snapshot_all(selected)
+            before, control = _control_window(selected, control_rounds)
+            unstable_observers = set(control["unstableObservers"])
+            if control["interference"]:
+                interfering_trials.append(trial_number)
             first_delta: list[Delta] = []
             first_call: dict[str, Any]
             if mode == "drop-result-after-response":
@@ -328,7 +355,12 @@ def _run_ambiguous_result_case(
                     **_public_call(first_result, 1),
                     "outcome": "response-discarded-at-verifier-boundary",
                 }
-                _check_first_call(declarations, first_delta, public)
+                _check_first_call(
+                    declarations,
+                    [delta for delta in first_delta
+                     if delta.observer_id not in unstable_observers],
+                    public,
+                )
             else:
                 after_first = before
                 first_call = {
@@ -342,10 +374,20 @@ def _run_ambiguous_result_case(
             retry_result = client.call_tool(case["tool"], case.get("arguments", {}))
             after_retry = _snapshot_all(selected)
             retry_delta = _diff_all(selected, after_first, after_retry)
-            _check_first_call(declarations, retry_delta, public)
-            first_changed = any(delta.changed for delta in first_delta)
-            retry_changed = any(delta.changed for delta in retry_delta)
-            if mode == "timeout-before-send" and retry_changed:
+            attributable_retry = [
+                delta for delta in retry_delta
+                if delta.observer_id not in unstable_observers
+            ]
+            _check_first_call(declarations, attributable_retry, public)
+            attributable_first = [
+                delta for delta in first_delta
+                if delta.observer_id not in unstable_observers
+            ]
+            first_changed = any(delta.changed for delta in attributable_first)
+            retry_changed = any(delta.changed for delta in attributable_retry)
+            if unstable_observers and len(unstable_observers) == len(selected):
+                classification = "observer-or-background-interference"
+            elif mode == "timeout-before-send" and retry_changed:
                 classification = "no-effect-timeout"
             elif first_changed and not retry_changed:
                 classification = "committed-result-lost"
@@ -358,6 +400,7 @@ def _run_ambiguous_result_case(
                 {
                     "trial": trial_number,
                     "classification": classification,
+                    "observerControl": control,
                     "calls": [first_call, _public_call(retry_result, 2)],
                     "deltas": {
                         "firstCall": [delta.public() for delta in first_delta],
@@ -389,9 +432,21 @@ def _run_ambiguous_result_case(
         "configuredTrials": int(fault.get("trials", 20)),
         "completedTrials": len(trials),
         "timeoutMs": int(fault.get("timeoutMs", 1000)),
+        "observerControlRounds": control_rounds,
+        "interferingTrials": interfering_trials,
         "classifications": classifications,
         "trials": trials,
     }
+    if interfering_trials:
+        public["inconclusive"].append(
+            {
+                "code": "OBSERVER_OR_BACKGROUND_INTERFERENCE",
+                "message": (
+                    "observed state changed with no tool call in trials "
+                    f"{interfering_trials}; unstable-observer deltas were excluded from attribution"
+                ),
+            }
+        )
     if classifications.get("duplicate-on-retry"):
         public["violations"].append(
             {
@@ -475,6 +530,35 @@ def _public_call(result: dict[str, Any], number: int) -> dict[str, Any]:
 
 def _snapshot_all(observers: list[Observer]) -> dict[str, Snapshot]:
     return {observer.observer_id: observer.snapshot() for observer in observers}
+
+
+def _control_window(
+    observers: list[Observer], rounds: int
+) -> tuple[dict[str, Snapshot], dict[str, Any]]:
+    """Run matched no-tool observation rounds before attributing any state change.
+
+    Snapshotting is not guaranteed to be passive (an HTTP observer issues a real
+    request) and the observed system may have background writers. Repeating the
+    exact observer sequence with no tool call first tells us whether a later delta
+    can be attributed to the tool at all. Returns the final baseline snapshot and
+    the public control evidence.
+    """
+    baseline = _snapshot_all(observers)
+    if rounds < 1:
+        return baseline, {"rounds": 0, "interference": False, "unstableObservers": [], "skipped": True}
+    unstable: set[str] = set()
+    for _ in range(rounds):
+        following = _snapshot_all(observers)
+        for delta in _diff_all(observers, baseline, following):
+            if delta.changed:
+                unstable.add(delta.observer_id)
+        baseline = following
+    return baseline, {
+        "rounds": rounds,
+        "interference": bool(unstable),
+        "unstableObservers": sorted(unstable),
+        "skipped": False,
+    }
 
 
 def _diff_all(
@@ -623,6 +707,11 @@ def _validate_manifest(manifest: dict[str, Any]) -> None:
         contract = case.get("contract", {})
         if not isinstance(contract, dict):
             raise ManifestError(f"case {case_id!r} contract must be an object")
+        rounds = case.get("observerControlRounds", 1)
+        if not isinstance(rounds, int) or isinstance(rounds, bool) or not 0 <= rounds <= 10:
+            raise ManifestError(
+                f"case {case_id!r} observerControlRounds must be an integer 0..10"
+            )
         allowed_contract = {
             "readOnlyHint",
             "destructiveHint",
