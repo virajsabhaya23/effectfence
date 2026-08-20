@@ -88,6 +88,19 @@ def write_sarif_report(report: dict[str, Any], path: str | Path) -> None:
                     "properties": {"caseId": case.get("id"), "tool": case.get("tool")},
                 }
             )
+        for item in case.get("inconclusive", []):
+            rule_id = str(item.get("code", "INCONCLUSIVE"))
+            rule_ids.add(rule_id)
+            results.append(
+                {
+                    "ruleId": rule_id,
+                    "level": "warning",
+                    "message": {
+                        "text": f"{case.get('id')}: {item.get('message', rule_id)}"
+                    },
+                    "properties": {"caseId": case.get("id"), "tool": case.get("tool")},
+                }
+            )
     for violation in report.get("policyViolations", []):
         rule_id = str(violation.get("code", "POLICY_FAILURE"))
         rule_ids.add(rule_id)

@@ -209,6 +209,17 @@ def _run_case(
     }
     selected_ids = case.get("observerIds", list(observers))
     selected = [observers[observer_id] for observer_id in selected_ids]
+    if "ambiguousResultFault" in case:
+        return _run_ambiguous_result_case(
+            case,
+            client=client,
+            declarations=declarations,
+            selected=selected,
+            public=public,
+            base=base,
+            server_environment=server_environment,
+            started=started,
+        )
     try:
         if "setup" in case:
             _run_hook(case["setup"], base, server_environment)
@@ -284,6 +295,118 @@ def _run_case(
                     {"code": "CLEANUP_FAILED", "message": _safe_error(error)}
                 )
     public["passed"] = not public["violations"]
+    return _finish_case(public, started)
+
+
+def _run_ambiguous_result_case(
+    case: dict[str, Any],
+    *,
+    client: McpStdioClient,
+    declarations: dict[str, bool],
+    selected: list[Observer],
+    public: dict[str, Any],
+    base: Path,
+    server_environment: dict[str, str],
+    started: float,
+) -> dict[str, Any]:
+    fault = case["ambiguousResultFault"]
+    mode = fault["mode"]
+    trials: list[dict[str, Any]] = []
+    classifications: dict[str, int] = {}
+    try:
+        for trial_number in range(1, int(fault.get("trials", 20)) + 1):
+            if "setup" in case:
+                _run_hook(case["setup"], base, server_environment)
+            before = _snapshot_all(selected)
+            first_delta: list[Delta] = []
+            first_call: dict[str, Any]
+            if mode == "drop-result-after-response":
+                first_result = client.call_tool(case["tool"], case.get("arguments", {}))
+                after_first = _snapshot_all(selected)
+                first_delta = _diff_all(selected, before, after_first)
+                first_call = {
+                    **_public_call(first_result, 1),
+                    "outcome": "response-discarded-at-verifier-boundary",
+                }
+                _check_first_call(declarations, first_delta, public)
+            else:
+                after_first = before
+                first_call = {
+                    "number": 1,
+                    "outcome": "timeout-before-request-send",
+                    "isError": False,
+                    "contentTypes": [],
+                    "structuredContentPresent": False,
+                }
+
+            retry_result = client.call_tool(case["tool"], case.get("arguments", {}))
+            after_retry = _snapshot_all(selected)
+            retry_delta = _diff_all(selected, after_first, after_retry)
+            _check_first_call(declarations, retry_delta, public)
+            first_changed = any(delta.changed for delta in first_delta)
+            retry_changed = any(delta.changed for delta in retry_delta)
+            if mode == "timeout-before-send" and retry_changed:
+                classification = "no-effect-timeout"
+            elif first_changed and not retry_changed:
+                classification = "committed-result-lost"
+            elif first_changed and retry_changed:
+                classification = "duplicate-on-retry"
+            else:
+                classification = "ambiguous-unknown"
+            classifications[classification] = classifications.get(classification, 0) + 1
+            trials.append(
+                {
+                    "trial": trial_number,
+                    "classification": classification,
+                    "calls": [first_call, _public_call(retry_result, 2)],
+                    "deltas": {
+                        "firstCall": [delta.public() for delta in first_delta],
+                        "retry": [delta.public() for delta in retry_delta],
+                    },
+                }
+            )
+    except (
+        ManifestError,
+        McpClientError,
+        ObserverError,
+        OSError,
+        subprocess.SubprocessError,
+    ) as error:
+        public["violations"].append(
+            {"code": "CASE_EXECUTION_FAILED", "message": _safe_error(error)}
+        )
+    finally:
+        if "cleanup" in case:
+            try:
+                _run_hook(case["cleanup"], base, server_environment)
+            except (OSError, subprocess.SubprocessError, ManifestError) as error:
+                public["violations"].append(
+                    {"code": "CLEANUP_FAILED", "message": _safe_error(error)}
+                )
+
+    public["ambiguousResult"] = {
+        "mode": mode,
+        "configuredTrials": int(fault.get("trials", 20)),
+        "completedTrials": len(trials),
+        "timeoutMs": int(fault.get("timeoutMs", 1000)),
+        "classifications": classifications,
+        "trials": trials,
+    }
+    if classifications.get("duplicate-on-retry"):
+        public["violations"].append(
+            {
+                "code": "AMBIGUOUS_RESULT_DUPLICATE_ON_RETRY",
+                "message": "retry after an ambiguous result changed observed state a second time",
+            }
+        )
+    if classifications.get("ambiguous-unknown"):
+        public["inconclusive"].append(
+            {
+                "code": "AMBIGUOUS_RESULT_UNCLASSIFIED",
+                "message": "observer evidence could not distinguish commit, no-effect, or duplicate behavior",
+            }
+        )
+    public["passed"] = not public["violations"] and not public["inconclusive"]
     return _finish_case(public, started)
 
 
@@ -516,6 +639,38 @@ def _validate_manifest(manifest: dict[str, Any]) -> None:
                 if not isinstance(hook, dict):
                     raise ManifestError(f"case {case_id!r} {hook_name} must be an object")
                 _command(hook.get("command"), f"case {case_id}.{hook_name}.command")
+        if "ambiguousResultFault" in case:
+            fault = case["ambiguousResultFault"]
+            if not isinstance(fault, dict):
+                raise ManifestError(
+                    f"case {case_id!r} ambiguousResultFault must be an object"
+                )
+            unknown_fault_fields = set(fault) - {"mode", "trials", "timeoutMs"}
+            if unknown_fault_fields:
+                raise ManifestError(
+                    f"case {case_id!r} ambiguousResultFault contains unknown fields"
+                )
+            if fault.get("mode") not in {
+                "drop-result-after-response",
+                "timeout-before-send",
+            }:
+                raise ManifestError(
+                    f"case {case_id!r} ambiguousResultFault.mode is invalid"
+                )
+            trials = fault.get("trials", 20)
+            if not isinstance(trials, int) or isinstance(trials, bool) or not 1 <= trials <= 100:
+                raise ManifestError(
+                    f"case {case_id!r} ambiguousResultFault.trials must be 1..100"
+                )
+            timeout_ms = fault.get("timeoutMs", 1000)
+            if (
+                not isinstance(timeout_ms, int)
+                or isinstance(timeout_ms, bool)
+                or timeout_ms < 1
+            ):
+                raise ManifestError(
+                    f"case {case_id!r} ambiguousResultFault.timeoutMs must be positive"
+                )
     minimum = manifest.get("policy", {}).get("minimumToolCoverage", 0)
     if not isinstance(minimum, (int, float)) or isinstance(minimum, bool) or not 0 <= minimum <= 1:
         raise ManifestError("policy.minimumToolCoverage must be between 0 and 1")

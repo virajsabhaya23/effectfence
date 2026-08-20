@@ -117,6 +117,97 @@ class McpConformanceTests(unittest.TestCase):
             self.assertEqual(ET.parse(junit_path).getroot().tag, "testsuite")
             self.assertEqual(json.loads(sarif_path.read_text())["version"], "2.1.0")
 
+    def test_ambiguous_result_accepts_idempotent_upsert_across_twenty_trials(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = self.manifest(
+                Path(directory),
+                [{
+                    "id": "ambiguous-upsert",
+                    "tool": "upsert_record",
+                    "arguments": {"id": "7", "value": "safe"},
+                    "ambiguousResultFault": {
+                        "mode": "drop-result-after-response",
+                        "trials": 20,
+                    },
+                }],
+            )
+            case = verify_manifest(path)["cases"][0]
+            self.assertTrue(case["passed"])
+            self.assertEqual(
+                case["ambiguousResult"]["classifications"],
+                {"committed-result-lost": 20},
+            )
+
+    def test_ambiguous_result_rejects_duplicate_on_retry(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = self.manifest(
+                Path(directory),
+                [{
+                    "id": "ambiguous-append",
+                    "tool": "append_audit",
+                    "ambiguousResultFault": {
+                        "mode": "drop-result-after-response",
+                        "trials": 20,
+                    },
+                }],
+            )
+            case = verify_manifest(path)["cases"][0]
+            self.assertFalse(case["passed"])
+            self.assertEqual(
+                case["ambiguousResult"]["classifications"],
+                {"duplicate-on-retry": 20},
+            )
+            self.assertIn(
+                "AMBIGUOUS_RESULT_DUPLICATE_ON_RETRY",
+                {item["code"] for item in case["violations"]},
+            )
+
+    def test_ambiguous_result_unknown_is_inconclusive_not_pass(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = self.manifest(
+                Path(directory),
+                [{
+                    "id": "ambiguous-read",
+                    "tool": "read_note",
+                    "ambiguousResultFault": {
+                        "mode": "drop-result-after-response",
+                        "trials": 20,
+                    },
+                }],
+            )
+            case = verify_manifest(path)["cases"][0]
+            self.assertFalse(case["passed"])
+            self.assertEqual(
+                case["ambiguousResult"]["classifications"],
+                {"ambiguous-unknown": 20},
+            )
+            self.assertIn(
+                "AMBIGUOUS_RESULT_UNCLASSIFIED",
+                {item["code"] for item in case["inconclusive"]},
+            )
+
+    def test_timeout_before_send_is_distinct_from_committed_timeout(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = self.manifest(
+                Path(directory),
+                [{
+                    "id": "pre-send-timeout",
+                    "tool": "upsert_record",
+                    "arguments": {"id": "7", "value": "safe"},
+                    "ambiguousResultFault": {
+                        "mode": "timeout-before-send",
+                        "trials": 20,
+                        "timeoutMs": 25,
+                    },
+                }],
+            )
+            case = verify_manifest(path)["cases"][0]
+            self.assertTrue(case["passed"])
+            self.assertEqual(
+                case["ambiguousResult"]["classifications"],
+                {"no-effect-timeout": 20},
+            )
+
     def test_paginated_tool_discovery(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = self.manifest(Path(directory), [{"id": "read", "tool": "read_note"}])

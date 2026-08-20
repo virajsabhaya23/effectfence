@@ -46,6 +46,7 @@ effectfence mcp-verify examples/mcp-conformance/failing.json \
 Companies can invoke the same verifier through `from effectfence import
 verify_manifest`, the CLI, or the included composite GitHub Action. See the
 [MCP conformance guide](docs/MCP_CONFORMANCE.md) for the versioned manifest,
+ambiguous-result retry fault schedules,
 observer boundary, security model, and CI example.
 
 ## Live Kafka/PostgreSQL proof

@@ -4,6 +4,10 @@ All notable changes will be documented here. This project follows Semantic Versi
 
 ## Unreleased
 
+- Added deterministic MCP ambiguous-result retry schedules with repeated,
+  observer-backed classifications for committed results, no-effect timeouts,
+  duplicate retries, and explicitly inconclusive outcomes.
+
 - Reworked deterministic broker delivery so a redelivery count is an attempt
   budget, not a command to invoke a handler after durable progress. Trace
   evidence now records delivery eligibility, skipped deliveries, explicit
