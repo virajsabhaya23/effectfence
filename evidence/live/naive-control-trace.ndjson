@@ -1,0 +1,14 @@
+{"actor":"controller","at":"2026-08-17T03:06:17.931865+00:00","detail":{"run_id":"local-naive-20260816-v2"},"event":"run_started"}
+{"actor":"controller","at":"2026-08-17T03:06:18.025279+00:00","detail":{},"event":"services_ready"}
+{"actor":"controller","at":"2026-08-17T03:06:18.141103+00:00","detail":{"offset":0,"partition":0},"event":"probe_delivered"}
+{"actor":"worker-1","at":"2026-08-17T03:06:18.328160+00:00","detail":{},"event":"consumer_starting"}
+{"actor":"worker-1","at":"2026-08-17T03:06:21.500542+00:00","detail":{"offset":0,"partition":0},"event":"message_received"}
+{"actor":"worker-1","at":"2026-08-17T03:06:21.507775+00:00","detail":{"effect_accepted":true},"event":"sink_transaction_committed"}
+{"actor":"worker-1","at":"2026-08-17T03:06:21.508252+00:00","detail":{"boundary":"after_sink_commit_before_offset_commit"},"event":"sigkill_injected"}
+{"actor":"controller","at":"2026-08-17T03:06:21.510931+00:00","detail":{"exitcode":-9},"event":"first_worker_exited"}
+{"actor":"worker-2","at":"2026-08-17T03:06:21.722366+00:00","detail":{},"event":"consumer_starting"}
+{"actor":"worker-2","at":"2026-08-17T03:06:27.513230+00:00","detail":{"offset":0,"partition":0},"event":"message_received"}
+{"actor":"worker-2","at":"2026-08-17T03:06:27.520199+00:00","detail":{"effect_accepted":true},"event":"sink_transaction_committed"}
+{"actor":"worker-2","at":"2026-08-17T03:06:27.521748+00:00","detail":{"committed_offsets":[{"offset":1,"partition":0,"topic":"effectfence-local-naive-20260816-v2"}]},"event":"offset_committed"}
+{"actor":"controller","at":"2026-08-17T03:06:27.551776+00:00","detail":{"exitcode":0},"event":"recovery_worker_exited"}
+{"actor":"controller","at":"2026-08-17T03:06:27.621451+00:00","detail":{"evidence_sha256":"8444f571fde89f48fe7b9cf785e11979811950dc88bf1d7483781df3c8dae017","expectation_met":true},"event":"run_finished"}

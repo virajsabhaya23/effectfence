@@ -1,0 +1,44 @@
+name: EffectFence MCP Conformance
+description: Verify MCP tool effect declarations against observed state changes
+author: Viraj Sabhaya
+branding:
+  icon: shield
+  color: blue
+inputs:
+  manifest:
+    description: Path to an effectfence.mcp.v1 manifest
+    required: true
+  out:
+    description: JSON report path
+    required: false
+    default: effectfence-mcp-report.json
+  junit:
+    description: JUnit report path
+    required: false
+    default: effectfence-mcp-junit.xml
+  sarif:
+    description: SARIF report path
+    required: false
+    default: effectfence-mcp.sarif
+outputs:
+  report:
+    description: JSON report path
+    value: ${{ inputs.out }}
+runs:
+  using: composite
+  steps:
+    - name: Install EffectFence
+      shell: bash
+      run: python -m pip install "${{ github.action_path }}"
+    - name: Verify MCP conformance
+      shell: bash
+      env:
+        EFFECTFENCE_MANIFEST: ${{ inputs.manifest }}
+        EFFECTFENCE_OUT: ${{ inputs.out }}
+        EFFECTFENCE_JUNIT: ${{ inputs.junit }}
+        EFFECTFENCE_SARIF: ${{ inputs.sarif }}
+      run: >-
+        python -m effectfence mcp-verify "$EFFECTFENCE_MANIFEST"
+        --out "$EFFECTFENCE_OUT"
+        --junit "$EFFECTFENCE_JUNIT"
+        --sarif "$EFFECTFENCE_SARIF"

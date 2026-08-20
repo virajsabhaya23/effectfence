@@ -1,0 +1,38 @@
+{
+  "broker": {
+    "committed_offset": 1,
+    "implementation": "Apache Kafka protocol",
+    "partition": 0,
+    "produced_offset": 0,
+    "topic": "effectfence-local-safe-20260816-v2",
+    "version_label": "apache/kafka:4.3.1"
+  },
+  "client_versions": {
+    "confluent-kafka": "2.15.0",
+    "psycopg": "3.3.4"
+  },
+  "effect_safe": true,
+  "evidence_sha256": "33dba9939364197807c5110a883598864a9de58d5a6784941bda17f99a856094",
+  "expectation_met": true,
+  "expected_outcome": "safe",
+  "first_worker_sigkilled": true,
+  "harness_ok": true,
+  "killpoint": {
+    "boundary": "after_sink_commit_before_offset_commit",
+    "first_worker_exitcode": -9,
+    "mechanism": "SIGKILL",
+    "recovery_worker_exitcode": 0
+  },
+  "message_id": "message-local-safe-20260816-v2",
+  "observed_outcome": "safe",
+  "run_id": "local-safe-20260816-v2",
+  "schema_version": "effectfence.live.v1",
+  "sink": {
+    "accepted_effects": 1,
+    "attempts": 2,
+    "implementation": "PostgreSQL",
+    "server_version": "18.4 (Homebrew)"
+  },
+  "strategy": "effectfence",
+  "violations": []
+}

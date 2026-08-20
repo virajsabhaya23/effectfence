@@ -5,7 +5,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from dataclasses import is_dataclass
 from typing import get_type_hints
 mods=["effectfence.model","effectfence.ledger","effectfence.sinks","effectfence.simulator",
-      "effectfence.explore","effectfence.io","effectfence.reports","effectfence.benchmark","effectfence.cli"]
+      "effectfence.explore","effectfence.io","effectfence.reports","effectfence.benchmark",
+      "effectfence.live","effectfence.observers","effectfence.mcp_client",
+      "effectfence.mcp_verifier","effectfence.mcp_reports","effectfence.citation",
+      "effectfence.cli"]
 errors=[]
 for name in mods:
     try: mod=importlib.import_module(name)

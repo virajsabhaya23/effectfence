@@ -26,6 +26,46 @@
       "name": "public-apis/public-apis",
       "url": "https://github.com/public-apis/public-apis",
       "role": "required public/free API inventory; no external API required by default verifier"
+    },
+    {
+      "name": "Apache Kafka 4.3 quickstart",
+      "url": "https://kafka.apache.org/quickstart/",
+      "role": "official Apache Kafka 4.3.1 binary and Docker execution reference"
+    },
+    {
+      "name": "Confluent Python client overview",
+      "url": "https://docs.confluent.io/kafka-clients/python/current/overview.html",
+      "role": "producer flush and manual consumer operation reference"
+    },
+    {
+      "name": "Kafka consumer offset management",
+      "url": "https://docs.confluent.io/platform/current/clients/consumer.html",
+      "role": "crash, group reassignment, at-least-once delivery, and manual offset commit semantics"
+    },
+    {
+      "name": "Psycopg transaction management",
+      "url": "https://www.psycopg.org/psycopg3/docs/basic/transactions.html",
+      "role": "PostgreSQL connection-context commit semantics used by the live sink"
+    },
+    {
+      "name": "MCP tools specification 2025-11-25",
+      "url": "https://modelcontextprotocol.io/specification/2025-11-25/server/tools",
+      "role": "normative tool discovery, invocation, annotations, and untrusted-hint boundary"
+    },
+    {
+      "name": "MCP tool annotations guidance",
+      "url": "https://blog.modelcontextprotocol.io/posts/2026-03-16-tool-annotations/",
+      "role": "official annotation semantics and safety guidance"
+    },
+    {
+      "name": "MCP SEP-1597 retry and idempotency proposal",
+      "url": "https://github.com/modelcontextprotocol/modelcontextprotocol/issues/1597",
+      "role": "primary evidence of duplicate side effects under agent retries"
+    },
+    {
+      "name": "Microsoft Fides Gateway",
+      "url": "https://github.com/microsoft/fides-gateway",
+      "role": "adjacent MCP policy and information-flow prior art, excluded from originality claim"
     }
   ]
 }

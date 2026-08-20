@@ -1,4 +1,5 @@
 import json, sqlite3, tempfile, unittest
+from dataclasses import replace
 from pathlib import Path
 from effectfence.io import load
 from effectfence.simulator import verify_scenario
@@ -22,6 +23,28 @@ class T(unittest.TestCase):
   s=load(str(ROOT/'examples/crash_after_effect.json')); m=minimize_failure(s); self.assertFalse(verify_scenario(m)['safe'])
  def test_certificate_stable(self):
   s=load(str(ROOT/'examples/safe_fenced_recovery.json')); self.assertEqual(verify_scenario(s)['certificate_sha256'],verify_scenario(s)['certificate_sha256'])
+ def test_ordinary_redelivery_budget_stops_after_durable_progress(self):
+  s=replace(load(str(ROOT/'examples/crash_after_effect.json')),crashes=(),redeliveries=5,ack_loss=False,concurrent_recovery=1)
+  result=verify_scenario(s)
+  self.assertEqual({k:result['broker_delivery'][k] for k in ('attempt_budget','attempted','skipped','eligible_after_run')},
+                   {'attempt_budget':5,'attempted':1,'skipped':4,'eligible_after_run':False})
+  self.assertEqual(result['broker_delivery']['state'],{'delivered':1,'in_flight':False,'progress_durable':True,'acked':True,'ownership_epoch':1})
+  self.assertEqual(result['accepted_effects'],1)
+ def test_crash_before_checkpoint_remains_delivery_eligible(self):
+  s=replace(load(str(ROOT/'examples/crash_after_effect.json')),crashes=('before_checkpoint',),redeliveries=2,ack_loss=False,concurrent_recovery=1)
+  result=verify_scenario(s)
+  self.assertEqual(result['broker_delivery']['attempted'],2)
+  self.assertTrue(any(e['event']=='delivery-start' and e['detail']['attempt']==2 for e in result['trace']))
+ def test_crash_after_checkpoint_blocks_ordinary_redelivery(self):
+  s=replace(load(str(ROOT/'examples/crash_after_effect.json')),crashes=('after_checkpoint',),redeliveries=2,ack_loss=False,concurrent_recovery=1)
+  result=verify_scenario(s)
+  self.assertEqual(result['broker_delivery']['attempted'],1)
+  self.assertEqual(result['broker_delivery']['skipped'],1)
+ def test_explicit_progress_loss_reenables_delivery(self):
+  s=replace(load(str(ROOT/'examples/crash_after_effect.json')),crashes=(),redeliveries=2,ack_loss=True,concurrent_recovery=1)
+  result=verify_scenario(s)
+  self.assertEqual(result['broker_delivery']['attempted'],2)
+  self.assertTrue(any(e['event']=='progress-lost' for e in result['trace']))
  def test_sqlite_sink(self):
   db=sqlite3.connect(':memory:'); sink=DbApiSink(db); self.assertTrue(sink.emit('m','k','a',1)); self.assertFalse(sink.emit('m','k','a',2))
  def test_http_sink(self):

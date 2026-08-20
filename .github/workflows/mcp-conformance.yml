@@ -1,0 +1,27 @@
+name: mcp-conformance
+on:
+  push:
+  pull_request:
+jobs:
+  fixture-conformance:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run EffectFence against the passing MCP fixture
+        uses: ./
+        with:
+          manifest: examples/mcp-conformance/passing.json
+          out: out/mcp/report.json
+          junit: out/mcp/junit.xml
+          sarif: out/mcp/report.sarif
+      - name: Preserve conformance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: effectfence-mcp-conformance
+          path: out/mcp/

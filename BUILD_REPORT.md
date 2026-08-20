@@ -1,5 +1,89 @@
 # BUILD REPORT — OC-011 EffectFence
 
+## Version 0.2 MCP conformance enhancement — 2026-08-16
+
+EffectFence now provides an enterprise-integrable MCP conformance runner. It
+starts a server over `stdio`, completes the MCP initialization lifecycle,
+discovers paginated tools, invokes versioned test cases, and compares tool effect
+declarations with state changes observed across filesystem, SQLite, and
+allowlisted HTTP JSON boundaries.
+
+### Demonstrated conformance result
+
+| Fixture | Cases | Observed result |
+| --- | ---: | --- |
+| Honest MCP server | 2 | PASS: read-only behavior and idempotent upsert verified |
+| Deliberately dishonest MCP server | 3 | FAIL: false read-only, idempotency, and non-destructive claims detected |
+
+The dishonest fixture is a positive control. A passing-only harness would not
+demonstrate that the verifier detects the target faults.
+
+### Integration surface
+
+- public `effectfence.verify_manifest()` Python API;
+- `effectfence mcp-verify` CLI with exit-code gating;
+- `effectfence.mcp.v1` JSON manifest and packaged JSON Schema;
+- redacted JSON certificate, JUnit, and SARIF reports;
+- composite `action.yml` for GitHub Actions;
+- filesystem, read-only SQLite query, and allowlisted HTTP JSON observers;
+- copy-ready BibTeX, CFF, and JSON citation metadata.
+
+### Verification status
+
+- format-hygiene gate: PASS
+- lint/static syntax gate: PASS
+- type-interface gate: PASS
+- compilation: PASS
+- automated tests: 32/32 PASS
+- honest MCP fixture E2E: PASS (exit 0)
+- dishonest MCP positive control: PASS (expected exit 2)
+- JSON/JUnit/SARIF generation: PASS
+- secret-value report exclusion: PASS
+- restricted subprocess environment test: PASS
+- read-only SQLite observer enforcement: PASS
+- reproducible dependency-free wheel and source-distribution contents: PASS
+
+No external company adoption is claimed by this local fixture. The next impact
+milestone is independent reproduction by MCP server teams, followed by public
+downstream integrations, defect reports, citations, or upstream changes. Those
+are materially stronger evidence than stars or self-authored demonstrations.
+
+## Version 0.2 live-adapter enhancement — 2026-08-16
+
+The highest-priority C5 improvement has been implemented: EffectFence now runs
+the sink-commit-before-offset-commit crash window against Apache Kafka 4.3.1 and
+PostgreSQL 18.4. The first consumer is terminated with real `SIGKILL`; a second
+consumer in the same group receives the uncommitted record and commits its
+offset after processing.
+
+### Live result
+
+| Strategy | Delivery attempts | Accepted effects | First exit | Recovered offset | Expected result |
+| --- | ---: | ---: | ---: | ---: | --- |
+| `effectfence` | 2 | 1 | -9 (`SIGKILL`) | 1 | SAFE — PASS |
+| `naive` control | 2 | 2 | -9 (`SIGKILL`) | 1 | UNSAFE — PASS |
+
+The unsafe control is gated on harness health. A missing redelivery, failed
+replacement worker, absent `SIGKILL`, or incorrect committed offset cannot be
+misreported as an expected unsafe finding.
+
+### Version 0.2 verification
+
+- format-hygiene gate: PASS
+- lint/static syntax gate: PASS
+- type-interface gate: PASS
+- compilation: PASS
+- automated tests: 18/18 PASS
+- clean optional-dependency install: PASS
+- wheel build: PASS (`effectfence-0.2.0-py3-none-any.whl`)
+- live EffectFence Kafka/PostgreSQL proof: PASS
+- live naive-retry positive unsafe control: PASS
+- secret-redaction test: PASS
+- versioned live reports and ordered traces: `evidence/live/`
+
+The live verification used Python 3.14.6, Apache Kafka 4.3.1,
+PostgreSQL 18.4, confluent-kafka 2.15.0, and psycopg 3.3.4 on a POSIX host.
+
 ## Selected idea
 OC-011 — EffectFence — Crash/Retry Side-Effect Safety Verifier
 
@@ -107,10 +191,18 @@ Explore schedules: `effectfence explore examples/crash_after_effect.json --out o
 Benchmark: `effectfence benchmark benchmark/corpus.json --out benchmark/results.json`
 
 ## Limitations
-The reference benchmark uses deterministic local delivery/sink models rather than a live Kafka/SQS cluster. HTTP and DB-API sink adapters are runnable, but broker/cloud-native adapters require external infrastructure. Results are coverage-qualified by the explored schedules, declared dedupe/evidence lifetime, and sink acceptance semantics.
+The 30-case reference benchmark uses deterministic local delivery/sink models.
+The live adapter separately covers one Kafka/PostgreSQL boundary on a
+single-partition topic. SQS, Debezium, Temporal, multi-partition rebalances,
+network partitions, and sink failover still require dedicated adapters. Results
+remain coverage-qualified by the exercised schedules, declared evidence
+lifetime, and sink acceptance semantics.
 
 ## Evidence preserved
 The repository stores the versioned Effect Safety Protocol, benchmark corpus/results, source provenance, exact test cases, deterministic certificates, SHA-256 file manifest, environment versions, and prior-art boundary.
 
-## Recommended first public release/adoption steps
-Publish the protocol and corpus first; then add native Kafka/SQS/Debezium/Temporal adapters, run the same schedules against staging infrastructure, and submit minimized externally confirmed counterexamples before making any field-level impact or adoption claim.
+## Recommended next adoption steps
+Publish version 0.2 with the live evidence, invite external reproduction against
+staging Kafka/PostgreSQL deployments, and require independently reproducible
+counterexamples before making any field-level impact or adoption claim. Future
+adapters should be prioritized from user demand rather than added for count.

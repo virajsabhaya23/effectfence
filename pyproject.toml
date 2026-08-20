@@ -1,24 +1,42 @@
 [build-system]
-requires = ["setuptools>=68"]
-build-backend = "setuptools.build_meta"
+requires = []
+build-backend = "build_backend"
+backend-path = ["."]
 
 [project]
 name = "effectfence"
-version = "0.1.1"
-description = "Crash/retry side-effect safety verifier"
+version = "0.2.0"
+description = "Crash/retry and MCP side-effect conformance verifier"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 authors = [{name = "Viraj Sabhaya"}]
+keywords = ["mcp", "model-context-protocol", "idempotency", "conformance", "crash-recovery"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Software Development :: Quality Assurance",
+    "Topic :: Software Development :: Testing"
+]
+
+[project.optional-dependencies]
+live-kafka-postgres = [
+    "confluent-kafka>=2.5,<3",
+    "psycopg[binary]>=3.2,<4",
+]
 
 [project.urls]
 Homepage = "https://github.com/virajsabhaya23/effectfence"
 Repository = "https://github.com/virajsabhaya23/effectfence"
 Issues = "https://github.com/virajsabhaya23/effectfence/issues"
+Documentation = "https://github.com/virajsabhaya23/effectfence/tree/main/docs"
+Changelog = "https://github.com/virajsabhaya23/effectfence/blob/main/CHANGELOG.md"
 
 [project.scripts]
 effectfence = "effectfence.cli:main"
-
-[tool.setuptools.packages.find]
-include = ["effectfence*"]
