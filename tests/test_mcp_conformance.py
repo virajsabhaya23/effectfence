@@ -208,6 +208,88 @@ class McpConformanceTests(unittest.TestCase):
                 {"no-effect-timeout": 20},
             )
 
+    def test_observer_control_records_a_stable_no_tool_window(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = self.manifest(Path(directory), [{"id": "read", "tool": "read_note"}])
+            case = verify_manifest(path)["cases"][0]
+            self.assertEqual(
+                case["observerControl"],
+                {"rounds": 1, "interference": False, "unstableObservers": [], "skipped": False},
+            )
+            self.assertTrue(case["passed"])
+
+    def test_snapshot_induced_state_change_is_interference_not_a_tool_violation(self) -> None:
+        # An observed endpoint that mutates on every read: the change is reproducible
+        # without any tool call, so it must never be blamed on the tool.
+        counter = {"value": 0}
+
+        class Counting(BaseHTTPRequestHandler):
+            def do_GET(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
+                counter["value"] += 1
+                body = json.dumps({"reads": counter["value"]}).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *args: object) -> None:
+                return
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Counting)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                path = self.manifest(root, [{"id": "read", "tool": "read_note"}])
+                value = json.loads(path.read_text())
+                value["observers"].append(
+                    {
+                        "id": "unsafe-endpoint",
+                        "kind": "http-json",
+                        "url": f"http://127.0.0.1:{server.server_address[1]}/state",
+                        "sensitive": False,
+                    }
+                )
+                path.write_text(json.dumps(value))
+                report = verify_manifest(path)
+                case = report["cases"][0]
+                self.assertTrue(case["observerControl"]["interference"])
+                self.assertIn("unsafe-endpoint", case["observerControl"]["unstableObservers"])
+                self.assertIn(
+                    "OBSERVER_OR_BACKGROUND_INTERFERENCE",
+                    {item["code"] for item in case["inconclusive"]},
+                )
+                # read_note declares readOnlyHint=true and the endpoint changed, but
+                # the change is not attributable, so no hint violation is raised.
+                self.assertEqual(case["violations"], [])
+                self.assertFalse(case["passed"])
+                self.assertEqual(report["verdict"], "fail")
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)
+
+    def test_observer_control_can_be_disabled_explicitly(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = self.manifest(Path(directory), [{"id": "read", "tool": "read_note"}])
+            value = json.loads(path.read_text())
+            value["cases"][0]["observerControlRounds"] = 0
+            path.write_text(json.dumps(value))
+            case = verify_manifest(path)["cases"][0]
+            self.assertTrue(case["observerControl"]["skipped"])
+            self.assertTrue(case["passed"])
+
+    def test_manifest_rejects_invalid_observer_control_rounds(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = self.manifest(Path(directory), [{"id": "read", "tool": "read_note"}])
+            value = json.loads(path.read_text())
+            value["cases"][0]["observerControlRounds"] = 99
+            path.write_text(json.dumps(value))
+            with self.assertRaises(ManifestError):
+                load_manifest(path)
+
     def test_paginated_tool_discovery(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = self.manifest(Path(directory), [{"id": "read", "tool": "read_note"}])
