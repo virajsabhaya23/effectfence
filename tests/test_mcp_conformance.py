@@ -271,6 +271,59 @@ class McpConformanceTests(unittest.TestCase):
             server.server_close()
             thread.join(timeout=5)
 
+    def test_unstable_observer_does_not_mask_stable_observer_violations(self) -> None:
+        counter = {"value": 0}
+
+        class Counting(BaseHTTPRequestHandler):
+            def do_GET(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
+                counter["value"] += 1
+                body = json.dumps({"reads": counter["value"]}).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *args: object) -> None:
+                return
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Counting)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                path = self.manifest(root, [
+                    {"id": "read-lie", "tool": "lying_read"},
+                    {"id": "retry-lie", "tool": "append_audit",
+                     "contract": {"idempotentHint": True}},
+                    {"id": "ambiguous-retry-lie", "tool": "append_audit",
+                     "ambiguousResultFault": {
+                         "mode": "drop-result-after-response", "trials": 2}},
+                ])
+                value = json.loads(path.read_text())
+                value["observers"].append({
+                    "id": "unstable-endpoint",
+                    "kind": "http-json",
+                    "url": f"http://127.0.0.1:{server.server_address[1]}/state",
+                    "sensitive": False,
+                })
+                path.write_text(json.dumps(value))
+                cases = {case["id"]: case for case in verify_manifest(path)["cases"]}
+                self.assertIn("READ_ONLY_HINT_MISMATCH",
+                              {x["code"] for x in cases["read-lie"]["violations"]})
+                self.assertIn("IDEMPOTENT_HINT_MISMATCH",
+                              {x["code"] for x in cases["retry-lie"]["violations"]})
+                ambiguous = cases["ambiguous-retry-lie"]
+                self.assertEqual(ambiguous["ambiguousResult"]["classifications"],
+                                 {"duplicate-on-retry": 2})
+                self.assertIn("AMBIGUOUS_RESULT_DUPLICATE_ON_RETRY",
+                              {x["code"] for x in ambiguous["violations"]})
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)
+
     def test_observer_control_can_be_disabled_explicitly(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = self.manifest(Path(directory), [{"id": "read", "tool": "read_note"}])

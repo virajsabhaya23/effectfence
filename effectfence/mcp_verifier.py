@@ -228,14 +228,14 @@ def _run_case(
         before, control = _control_window(selected, control_rounds)
         public["observerControl"] = control
         # A state transition reproducible without the tool cannot be blamed on it.
-        attributable = not control["interference"]
-        if not attributable:
+        unstable_observers = set(control["unstableObservers"])
+        if unstable_observers:
             public["inconclusive"].append(
                 {
                     "code": "OBSERVER_OR_BACKGROUND_INTERFERENCE",
                     "message": (
-                        "observed state changed with no tool call, so later deltas "
-                        f"cannot be attributed to the tool: {control['unstableObservers']}"
+                        "observed state changed with no tool call; deltas from these "
+                        f"observers cannot be attributed to the tool: {control['unstableObservers']}"
                     ),
                 }
             )
@@ -255,8 +255,11 @@ def _run_case(
                 }
             )
 
-        if attributable:
-            _check_first_call(declarations, first_delta, public)
+        attributable_first = [
+            delta for delta in first_delta
+            if delta.observer_id not in unstable_observers
+        ]
+        _check_first_call(declarations, attributable_first, public)
 
         retry_enabled = bool(case.get("retry", declarations.get("idempotentHint") is True))
         if retry_enabled:
@@ -275,19 +278,19 @@ def _run_case(
                         ),
                     }
                 )
-            if (
-                attributable
-                and declarations.get("idempotentHint") is True
-                and any(delta.changed for delta in retry_delta)
-            ):
+            attributable_retry = [
+                delta for delta in retry_delta
+                if delta.observer_id not in unstable_observers
+            ]
+            if (declarations.get("idempotentHint") is True
+                    and any(delta.changed for delta in attributable_retry)):
                 public["violations"].append(
                     {
                         "code": "IDEMPOTENT_HINT_MISMATCH",
                         "message": "repeating the same call changed observed state again",
                     }
                 )
-            if attributable:
-                _check_first_call(declarations, retry_delta, public)
+            _check_first_call(declarations, attributable_retry, public)
         elif declarations.get("idempotentHint") is not None:
             public["inconclusive"].append(
                 {
@@ -339,6 +342,7 @@ def _run_ambiguous_result_case(
             if "setup" in case:
                 _run_hook(case["setup"], base, server_environment)
             before, control = _control_window(selected, control_rounds)
+            unstable_observers = set(control["unstableObservers"])
             if control["interference"]:
                 interfering_trials.append(trial_number)
             first_delta: list[Delta] = []
@@ -351,8 +355,12 @@ def _run_ambiguous_result_case(
                     **_public_call(first_result, 1),
                     "outcome": "response-discarded-at-verifier-boundary",
                 }
-                if not control["interference"]:
-                    _check_first_call(declarations, first_delta, public)
+                _check_first_call(
+                    declarations,
+                    [delta for delta in first_delta
+                     if delta.observer_id not in unstable_observers],
+                    public,
+                )
             else:
                 after_first = before
                 first_call = {
@@ -366,11 +374,18 @@ def _run_ambiguous_result_case(
             retry_result = client.call_tool(case["tool"], case.get("arguments", {}))
             after_retry = _snapshot_all(selected)
             retry_delta = _diff_all(selected, after_first, after_retry)
-            if not control["interference"]:
-                _check_first_call(declarations, retry_delta, public)
-            first_changed = any(delta.changed for delta in first_delta)
-            retry_changed = any(delta.changed for delta in retry_delta)
-            if control["interference"]:
+            attributable_retry = [
+                delta for delta in retry_delta
+                if delta.observer_id not in unstable_observers
+            ]
+            _check_first_call(declarations, attributable_retry, public)
+            attributable_first = [
+                delta for delta in first_delta
+                if delta.observer_id not in unstable_observers
+            ]
+            first_changed = any(delta.changed for delta in attributable_first)
+            retry_changed = any(delta.changed for delta in attributable_retry)
+            if unstable_observers and len(unstable_observers) == len(selected):
                 classification = "observer-or-background-interference"
             elif mode == "timeout-before-send" and retry_changed:
                 classification = "no-effect-timeout"
@@ -428,7 +443,7 @@ def _run_ambiguous_result_case(
                 "code": "OBSERVER_OR_BACKGROUND_INTERFERENCE",
                 "message": (
                     "observed state changed with no tool call in trials "
-                    f"{interfering_trials}; those trials cannot attribute an effect to the tool"
+                    f"{interfering_trials}; unstable-observer deltas were excluded from attribution"
                 ),
             }
         )
