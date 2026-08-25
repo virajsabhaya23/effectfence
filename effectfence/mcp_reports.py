@@ -17,18 +17,30 @@ def write_json_report(report: dict[str, Any], path: str | Path) -> None:
 def write_junit_report(report: dict[str, Any], path: str | Path) -> None:
     cases = report.get("cases", [])
     failures = sum(1 for case in cases if not case.get("passed"))
-    if report.get("fatalError") or report.get("policyViolations"):
+    has_policy_failure = bool(report.get("fatalError") or report.get("policyViolations"))
+    if has_policy_failure:
         failures += 1
+    total_tests = len(cases) + (1 if has_policy_failure else 0)
+    # GitHub/Jenkins expect time in seconds; report stores ms
+    try:
+        suite_time = float(report.get("durationMs", 0)) / 1000.0
+    except Exception:
+        suite_time = 0.0
     suite = ET.Element(
         "testsuite",
         {
             "name": "effectfence-mcp-conformance",
-            "tests": str(len(cases) + (1 if failures > sum(not c.get("passed") for c in cases) else 0)),
+            "tests": str(total_tests),
             "failures": str(failures),
             "errors": "0",
-            "time": f"{float(report.get('durationMs', 0)) / 1000:.3f}",
+            "time": f"{suite_time:.3f}",
         },
     )
+    # surface the certificate as a property so CI can link JSON <-> JUnit
+    props = ET.SubElement(suite, "properties")
+    cert = report.get("certificateSha256") or report.get("certificate_sha256") or ""
+    if cert:
+        ET.SubElement(props, "property", {"name": "certificateSha256", "value": str(cert)})
     for case in cases:
         node = ET.SubElement(
             suite,
@@ -75,30 +87,31 @@ def write_sarif_report(report: dict[str, Any], path: str | Path) -> None:
     results: list[dict[str, Any]] = []
     rule_ids: set[str] = set()
     for case in report.get("cases", []):
+        case_id = str(case.get("id", "unknown"))
+        tool = str(case.get("tool", "unknown"))
         for violation in case.get("violations", []):
             rule_id = str(violation.get("code", "CONFORMANCE_FAILURE"))
             rule_ids.add(rule_id)
+            # keep message short – SARIF viewers truncate long text
+            msg = violation.get("message") or violation.get("detail") or rule_id
             results.append(
                 {
                     "ruleId": rule_id,
                     "level": "error",
-                    "message": {
-                        "text": f"{case.get('id')}: {violation.get('message', rule_id)}"
-                    },
-                    "properties": {"caseId": case.get("id"), "tool": case.get("tool")},
+                    "message": {"text": f"{case_id} ({tool}): {msg}"},
+                    "properties": {"caseId": case_id, "tool": tool},
                 }
             )
         for item in case.get("inconclusive", []):
             rule_id = str(item.get("code", "INCONCLUSIVE"))
             rule_ids.add(rule_id)
+            msg = item.get("message") or item.get("detail") or rule_id
             results.append(
                 {
                     "ruleId": rule_id,
                     "level": "warning",
-                    "message": {
-                        "text": f"{case.get('id')}: {item.get('message', rule_id)}"
-                    },
-                    "properties": {"caseId": case.get("id"), "tool": case.get("tool")},
+                    "message": {"text": f"{case_id} ({tool}): {msg}"},
+                    "properties": {"caseId": case_id, "tool": tool},
                 }
             )
     for violation in report.get("policyViolations", []):
@@ -120,6 +133,16 @@ def write_sarif_report(report: dict[str, Any], path: str | Path) -> None:
                 "message": {"text": str(report["fatalError"])},
             }
         )
+    # keep SARIF minimal but valid – GitHub code scanning expects rules even if results is empty
+    rules = [
+        {
+            "id": rule_id,
+            "name": rule_id,
+            "shortDescription": {"text": _rule_title(rule_id)},
+            "helpUri": "https://github.com/virajsabhaya23/effectfence/blob/main/docs/MCP_CONFORMANCE.md",
+        }
+        for rule_id in sorted(rule_ids)
+    ]
     sarif = {
         "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
         "version": "2.1.0",
@@ -129,13 +152,8 @@ def write_sarif_report(report: dict[str, Any], path: str | Path) -> None:
                     "driver": {
                         "name": "EffectFence MCP Conformance",
                         "informationUri": "https://github.com/virajsabhaya23/effectfence",
-                        "rules": [
-                            {
-                                "id": rule_id,
-                                "shortDescription": {"text": _rule_title(rule_id)},
-                            }
-                            for rule_id in sorted(rule_ids)
-                        ],
+                        "version": str(report.get("effectfenceVersion", "0.2.0")),
+                        "rules": rules,
                     }
                 },
                 "results": results,
