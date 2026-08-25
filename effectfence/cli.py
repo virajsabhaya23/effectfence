@@ -12,6 +12,7 @@ from .explore import explore, minimize_failure
 from .io import load, save
 from .live import LiveConfig, default_run_id, run_live_kafka_postgres
 from .mcp_reports import write_json_report, write_junit_report, write_sarif_report
+from .mcp_scan import ScanError, build_manifest, list_server_tools, write_manifest
 from .mcp_verifier import ManifestError, verify_manifest
 from .reports import junit
 from .simulator import verify_scenario
@@ -44,6 +45,29 @@ def build_parser() -> argparse.ArgumentParser:
     mcp.add_argument("--out", default="effectfence-mcp-report.json")
     mcp.add_argument("--junit")
     mcp.add_argument("--sarif")
+
+    scan = commands.add_parser(
+        "mcp-scan",
+        help="generate a conformance manifest from a live server's advertised tools",
+    )
+    scan.add_argument("--observer-root", required=True, help="sandbox directory to observe")
+    scan.add_argument("--out", required=True, help="path for the generated manifest")
+    scan.add_argument("--cwd", default=".")
+    scan.add_argument(
+        "--include-destructive",
+        action="store_true",
+        help="also generate cases for tools declaring destructiveHint (sandbox only)",
+    )
+    scan.add_argument("--setup-command", nargs="+")
+    scan.add_argument("--min-coverage", type=float, default=0.0)
+    scan.add_argument("--inherit-env", nargs="+", default=["HOME"])
+    scan.add_argument("--protocol-version", default="2025-11-25")
+    scan.add_argument("--startup-timeout", type=float, default=60.0)
+    scan.add_argument(
+        "command",
+        nargs="+",
+        help="stdio command that starts the server; place it after ' -- '",
+    )
 
     cite = commands.add_parser("citation", help="print copy-ready citation metadata")
     cite.add_argument("--format", choices=("bibtex", "cff", "json"), default="bibtex")
@@ -140,6 +164,46 @@ def main(argv: list[str] | None = None) -> int:
             )
         )
         return 0 if report["verdict"] == "pass" else 2
+
+    if arguments.cmd == "mcp-scan":
+        observer_root = Path(arguments.observer_root)
+        observer_root.mkdir(parents=True, exist_ok=True)
+        try:
+            tools, server_info = list_server_tools(
+                arguments.command,
+                cwd=Path(arguments.cwd).resolve(),
+                inherit_env=arguments.inherit_env,
+                protocol_version=arguments.protocol_version,
+                startup_timeout_seconds=arguments.startup_timeout,
+            )
+            manifest = build_manifest(
+                tools,
+                command=arguments.command,
+                observer_root=str(observer_root),
+                cwd=arguments.cwd,
+                include_destructive=arguments.include_destructive,
+                setup_command=arguments.setup_command,
+                minimum_tool_coverage=arguments.min_coverage,
+                inherit_env=arguments.inherit_env,
+                protocol_version=arguments.protocol_version,
+            )
+        except ScanError as error:
+            parser.error(str(error))
+        destination = write_manifest(manifest, arguments.out)
+        print(
+            json.dumps(
+                {
+                    "server": server_info.get("name"),
+                    "version": server_info.get("version"),
+                    "toolsAdvertised": len(tools),
+                    "casesGenerated": len(manifest["cases"]),
+                    "skipped": manifest["generated"]["skipped"],
+                    "manifest": str(destination),
+                },
+                indent=2,
+            )
+        )
+        return 0
 
     if arguments.cmd == "citation":
         print(citation(arguments.format))
