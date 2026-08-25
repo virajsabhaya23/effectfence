@@ -37,7 +37,7 @@ jobs:
         run: python -m effectfence benchmark benchmark/corpus.json --out benchmark/results.json
       - name: Keep benchmark results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: benchmark-results
           path: benchmark/results.json
