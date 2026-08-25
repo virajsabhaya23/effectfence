@@ -43,6 +43,37 @@ effectfence mcp-verify examples/mcp-conformance/failing.json \
   --out out/mcp/failing.json
 ```
 
+## Scanning a server without writing a manifest
+
+`mcp-scan` connects to a server, reads `tools/list`, and synthesizes a manifest
+from each tool's advertised `inputSchema`, so auditing an unfamiliar server does
+not require hand-authoring a case per tool.
+
+```bash
+mkdir -p sandbox
+effectfence mcp-scan \
+  --observer-root sandbox \
+  --out out/mcp/generated.json \
+  -- npx -y @modelcontextprotocol/server-filesystem "$PWD/sandbox"
+
+effectfence mcp-verify out/mcp/generated.json --out out/mcp/report.json
+```
+
+The server command goes after `--` so its own flags are not parsed by
+`effectfence`.
+
+Tools declaring `destructiveHint: true` are **skipped by default** and listed
+under `generated.skipped`; pass `--include-destructive` to audit them, and only
+against a disposable sandbox. Declared annotations are copied into each case
+`contract`, so the generated manifest checks the server against its own claims.
+
+Argument synthesis honours `const`, `enum`, `default`, numeric minimums, array
+`minItems`, nullable unions, and nested objects, and it distinguishes file paths
+from directory paths using the property description and tool name. Generated
+arguments are still a heuristic: triage `TOOL_ERROR_EXPECTATION_MISMATCH`
+results before reporting them, because an unsatisfiable generated argument can
+look like a conformance finding.
+
 Companies can invoke the same verifier through `from effectfence import
 verify_manifest`, the CLI, or the included composite GitHub Action. See the
 [MCP conformance guide](docs/MCP_CONFORMANCE.md) for the versioned manifest,
