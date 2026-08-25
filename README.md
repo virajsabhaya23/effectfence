@@ -1,5 +1,7 @@
 # EffectFence
 
+> **Name note (Aug 2026):** The name `EffectFence` is also used by a Rust/npm runtime fence for agent tool calls by AurumFlux (`crates.io/crates/effectfence` / `npm:effectfence`, repo `aurumflux20/effectfence`, shipped 2026-08-05). This repo (`virajsabhaya23/effectfence`, PyPI `effectfence` 0.2.x, shipped 2026-08-16) is a **deterministic schedule verifier / MCP conformance checker**, not a runtime fence — different tool, same niche. We are renaming the PyPI distribution to avoid confusion (see issue #1). Until the rename lands, please check the repository URL when reporting bugs.
+
 Crash/retry and MCP side-effect conformance verifier.
 
 At-least-once queues, consumer retries, and transactional outbox patterns still leave application developers with an important question:
