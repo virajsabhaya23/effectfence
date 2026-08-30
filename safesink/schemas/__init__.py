@@ -1,0 +1,1 @@
+"""Versioned EffectFence manifest schemas."""

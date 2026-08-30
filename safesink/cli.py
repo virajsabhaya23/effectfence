@@ -31,7 +31,7 @@ def _die(parser: argparse.ArgumentParser, message: str, *, hint: str | None = No
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="effectfence", description="Crash/retry and MCP side-effect verifier (formerly EffectFence)"
+        prog="safesink", description="Crash/retry and MCP side-effect verifier (formerly EffectFence)"
     )
     commands = parser.add_subparsers(dest="cmd", required=True)
 
@@ -111,8 +111,6 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    import warnings
-    warnings.warn("effectfence is deprecated, use safesink (pip install safesink)", DeprecationWarning, stacklevel=2)
     parser = build_parser()
     arguments = parser.parse_args(argv)
     if arguments.cmd == "verify":
