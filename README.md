@@ -1,6 +1,6 @@
-# EffectFence
+# SafeSink
 
-> **Name note (Aug 2026):** The name `EffectFence` is also used by a Rust/npm runtime fence for agent tool calls by AurumFlux (`crates.io/crates/effectfence` / `npm:effectfence`, repo `aurumflux20/effectfence`, shipped 2026-08-05). This repo (`virajsabhaya23/effectfence`, PyPI `effectfence` 0.2.x, shipped 2026-08-16) is a **deterministic schedule verifier / MCP conformance checker**, not a runtime fence — different tool, same niche. We are renaming the PyPI distribution to avoid confusion (see issue #1). Until the rename lands, please check the repository URL when reporting bugs.
+> **Formerly EffectFence** — renamed to `safesink` on 2026-08-29 to avoid collision with `aurumflux20/effectfence` (Rust `crates.io/crates/effectfence` / `npm:effectfence` runtime fence, shipped 2026-08-05). This Python package (`pip install safesink`, `import safesink`, CLI `safesink`) is the **deterministic schedule verifier / MCP conformance checker** shipped as `effectfence` 0.2.x on 2026-08-16. `effectfence` remains as a deprecated alias (see issue #1). Related work: the two tools are complementary – runtime fence vs verifier.
 
 Crash/retry and MCP side-effect conformance verifier.
 
@@ -8,7 +8,7 @@ At-least-once queues, consumer retries, and transactional outbox patterns still 
 
 > If the process crashes at every durable boundary and the message is redelivered later, can the external effect be lost, duplicated, or accepted by a stale retry?
 
-EffectFence explores those schedules deterministically and verifies the **observable sink effects**.
+SafeSink (formerly EffectFence) explores those schedules deterministically and verifies the **observable sink effects**.
 
 It also tests whether MCP tools behave like their declared `readOnlyHint`,
 `destructiveHint`, `idempotentHint`, and `openWorldHint` annotations within an
@@ -19,11 +19,12 @@ explicit filesystem, SQLite, or HTTP JSON observation boundary.
 Python 3.10+, no runtime dependencies. The repository includes a dependency-free PEP 517 build backend, so installation works offline from a clean virtual environment.
 
 ```bash
-python -m pip install https://github.com/virajsabhaya23/effectfence/releases/download/v0.1.0/effectfence-0.1.0-py3-none-any.whl
-effectfence verify examples/safe_fenced_recovery.json
-effectfence verify examples/crash_after_effect.json --out out/report.json --junit out/report.xml
-effectfence explore examples/crash_after_effect.json --out out/exploration.json
-effectfence benchmark benchmark/corpus.json --out benchmark/results.json
+python -m pip install safesink  # formerly effectfence 0.2.x
+safesink verify examples/safe_fenced_recovery.json
+safesink verify examples/crash_after_effect.json --out out/report.json --junit out/report.xml
+safesink explore examples/crash_after_effect.json --out out/exploration.json
+safesink benchmark benchmark/corpus.json --out benchmark/results.json
+# legacy alias still works: effectfence verify ...
 ```
 
 ## MCP conformance quick start
@@ -31,7 +32,7 @@ effectfence benchmark benchmark/corpus.json --out benchmark/results.json
 Run the included honest fixture and emit JSON, JUnit, and SARIF evidence:
 
 ```bash
-effectfence mcp-verify examples/mcp-conformance/passing.json \
+safesink mcp-verify examples/mcp-conformance/passing.json \
   --out out/mcp/report.json \
   --junit out/mcp/junit.xml \
   --sarif out/mcp/report.sarif
@@ -41,7 +42,7 @@ The deliberately dishonest fixture exits with status 2 and demonstrates the
 three primary findings:
 
 ```bash
-effectfence mcp-verify examples/mcp-conformance/failing.json \
+safesink mcp-verify examples/mcp-conformance/failing.json \
   --out out/mcp/failing.json
 ```
 
@@ -53,16 +54,16 @@ not require hand-authoring a case per tool.
 
 ```bash
 mkdir -p sandbox
-effectfence mcp-scan \
+safesink mcp-scan \
   --observer-root sandbox \
   --out out/mcp/generated.json \
   -- npx -y @modelcontextprotocol/server-filesystem "$PWD/sandbox"
 
-effectfence mcp-verify out/mcp/generated.json --out out/mcp/report.json
+safesink mcp-verify out/mcp/generated.json --out out/mcp/report.json
 ```
 
 The server command goes after `--` so its own flags are not parsed by
-`effectfence`.
+`safesink`.
 
 Tools declaring `destructiveHint: true` are **skipped by default** and listed
 under `generated.skipped`; pass `--include-destructive` to audit them, and only
@@ -76,8 +77,8 @@ arguments are still a heuristic: triage `TOOL_ERROR_EXPECTATION_MISMATCH`
 results before reporting them, because an unsatisfiable generated argument can
 look like a conformance finding.
 
-Companies can invoke the same verifier through `from effectfence import
-verify_manifest`, the CLI, or the included composite GitHub Action. See the
+Companies can invoke the same verifier through `from safesink import
+verify_manifest` (`from effectfence import verify_manifest` still works, deprecated), the CLI, or the included composite GitHub Action. See the
 [MCP conformance guide](docs/MCP_CONFORMANCE.md) for the versioned manifest,
 ambiguous-result retry fault schedules,
 observer boundary, security model, and CI example.
@@ -96,16 +97,17 @@ resource is required.
 python -m pip install ".[live-kafka-postgres]"
 docker compose -f docker-compose.live.yml up -d --wait
 
-export EFFECTFENCE_POSTGRES_DSN='postgresql://effectfence:effectfence-local-only@127.0.0.1:5432/effectfence'
+export SAFESINK_POSTGRES_DSN='postgresql://safesink:safesink-local-only@127.0.0.1:5432/safesink'
+# legacy var still accepted: EFFECTFENCE_POSTGRES_DSN
 
 # Stable effect identity: two delivery attempts, exactly one accepted effect.
-effectfence live-kafka-postgres \
-  --strategy effectfence \
+safesink live-kafka-postgres \
+  --strategy safesink \
   --expect safe \
   --broker-version-label apache/kafka:4.3.1
 
 # Positive unsafe control: the same crash window must create a duplicate.
-effectfence live-kafka-postgres \
+safesink live-kafka-postgres \
   --strategy naive \
   --expect unsafe \
   --broker-version-label apache/kafka:4.3.1
@@ -124,7 +126,7 @@ security boundary, CI setup, and cleanup.
 - `naive_retry`
 - `idempotency_key`
 - `transactional_outbox`
-- `effectfence` — sink-side acceptance evidence + stable effect identity + monotonic fences
+- `safesink` (alias `effectfence` for compat) — sink-side acceptance evidence + stable effect identity + monotonic fences
 
 These are executable **reference strategies**, not claims that a particular Kafka/SQS/Debezium production deployment behaves identically.
 
@@ -162,7 +164,7 @@ digests are excluded by default.
 
 ## Citation and adoption
 
-Run `effectfence citation --format bibtex` or use [`CITATION.cff`](CITATION.cff).
+Run `safesink citation --format bibtex` (or `effectfence citation` deprecated) or use [`CITATION.cff`](CITATION.cff).
 The [citation guide](docs/CITING.md) explains reproducible citation metadata, and
 the [adoption evidence guide](docs/ADOPTION_EVIDENCE.md) separates independent
 impact evidence from repository vanity metrics. No archival DOI is claimed yet.
@@ -172,12 +174,12 @@ impact evidence from repository vanity metrics. No archival DOI is claimed yet.
 The 30-case corpus contains 20 unsafe schedules grounded in documented Kafka/SQS/outbox/fencing failure classes and 10 safe controls. Run it with:
 
 ```bash
-python -m effectfence benchmark benchmark/corpus.json --out benchmark/results.json
+python -m safesink benchmark benchmark/corpus.json --out benchmark/results.json
 ```
 
 ## Security
 
-EffectFence's default verification path runs only local deterministic fixtures.
+SafeSink's default verification path runs only local deterministic fixtures.
 MCP commands are executed without a shell and receive a restricted environment;
 only explicitly inherited variables are passed. HTTP observer hosts are
 allowlisted and redirects are blocked. The live command creates one topic and
