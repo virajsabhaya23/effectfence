@@ -28,7 +28,7 @@ classifiers = [
 [project.optional-dependencies]
 live-kafka-postgres = [
     "confluent-kafka>=2.15.0,<3",
-    "psycopg[binary]>=3.3.4,<4",
+    "psycopg[binary]>=3.3.5,<4",
 ]
 
 [project.urls]
