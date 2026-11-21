@@ -367,6 +367,38 @@ measure corpus authoring, not detection of real systems).
 The deprecated `effectfence` import path and console script still work and
 forward to `safesink`.
 
+## Who it is for
+
+- **Server authors** - ship a conformance report and a signed certificate with a
+  release.
+- **Platform teams** - `safesink audit` reads the Claude Desktop, VS Code or
+  Cursor config you already have and reports which configured servers contradict
+  their own annotations.
+- **Agents** - `safesink-mcp` exposes lint as a tool; execution stays opt-in.
+- **CI** - the action gates a pull request against a baseline.
+- **Directories** - pinned, reproducible scans instead of screenshots.
+
+[`docs/USE_CASES.md`](docs/USE_CASES.md) has the command and the honest limit for
+each.
+
+## Already configured a host? Audit it
+
+```bash
+safesink audit --markdown out/audit.md
+```
+
+Reads `.mcp.json`, `.vscode/mcp.json`, `.cursor/mcp.json` and the usual Claude
+Desktop config, then checks every server in them. One broken server is reported
+as `error` without hiding the others.
+
+## Protocol support
+
+SafeSink speaks the current stateless MCP revision (`2026-07-28`) and the older
+`initialize` handshake. With `"protocolVersion": "auto"` (the default) it probes
+`server/discover`, negotiates a common version, and falls back to the handshake
+for servers that predate the change - including streamable HTTP, where the probe
+and headers differ. See [docs/MCP_CONFORMANCE.md](docs/MCP_CONFORMANCE.md).
+
 ## GitHub Actions
 
 ```yaml
@@ -427,6 +459,13 @@ The SVG shows the verdict and score for one pinned server version. It is not a
 certification; `safesink sign` issues the certificate. See
 [`docs/LEADERBOARD.md`](docs/LEADERBOARD.md) for the badge and the nightly scan
 of the pinned servers in `servers.json`.
+
+## Findable by agents
+
+`server.json` is the entry for the official MCP Registry, so hosts and agents can
+discover `safesink-mcp`. [`docs/REGISTRY.md`](docs/REGISTRY.md) covers the one
+owner step (publish after the PyPI release) and why the description states that
+execution is opt-in.
 
 ## Name
 

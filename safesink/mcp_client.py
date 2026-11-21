@@ -10,6 +10,21 @@ from collections import deque
 from pathlib import Path
 from typing import Any
 
+from .mcp_protocol import (
+    SUPPORTED_PROTOCOL_VERSIONS,
+    UNSUPPORTED_PROTOCOL_VERSION,
+    is_modern_version,
+    modern_meta,
+    pick_common_version,
+    server_info as _server_info,
+    wants_modern,
+    with_meta,
+)
+
+# One probe per server command per process: the era is a property of the server,
+# not of a single request, and repeating a 1s timeout per case would be waste.
+_ERA_CACHE: dict[tuple[str, ...], str] = {}
+
 
 def _client_version() -> str:
     # Imported lazily: this module is imported while ``safesink/__init__`` runs.
@@ -20,6 +35,22 @@ def _client_version() -> str:
 
 class McpClientError(RuntimeError):
     """Raised when an MCP server cannot complete the requested protocol operation."""
+
+
+class McpProtocolError(McpClientError):
+    """A JSON-RPC error, kept structured so version negotiation can react to it."""
+
+    def __init__(self, code: object, data: object = None, message: str = "") -> None:
+        self.code = code
+        self.data = data if isinstance(data, dict) else {}
+        super().__init__(message or f"MCP error {code}")
+
+
+def _negotiate_probe_version(error: McpProtocolError) -> str | None:
+    if error.code != UNSUPPORTED_PROTOCOL_VERSION:
+        return None
+    supported = error.data.get("supported")
+    return pick_common_version(supported, SUPPORTED_PROTOCOL_VERSIONS[0])
 
 
 class McpStdioClient:
@@ -37,8 +68,9 @@ class McpStdioClient:
         environment: dict[str, str],
         request_timeout_seconds: float = 30.0,
         startup_timeout_seconds: float = 15.0,
-        protocol_version: str = "2025-11-25",
+        protocol_version: str = "auto",
         max_message_bytes: int = 8 * 1024 * 1024,
+        probe_timeout_seconds: float = 1.0,
     ) -> None:
         if not command or not all(isinstance(item, str) and item for item in command):
             raise ValueError("MCP command must be a non-empty array of strings")
@@ -53,6 +85,8 @@ class McpStdioClient:
         self.startup_timeout_seconds = startup_timeout_seconds
         self.protocol_version = protocol_version
         self.max_message_bytes = max_message_bytes
+        self.probe_timeout_seconds = probe_timeout_seconds
+        self.era = "legacy"
         self.process: subprocess.Popen[str] | None = None
         self.server_info: dict[str, Any] = {}
         self.server_capabilities: dict[str, Any] = {}
@@ -100,24 +134,95 @@ class McpStdioClient:
         self._reader.start()
         self._stderr_reader.start()
         try:
-            result = self.request(
-                "initialize",
-                {
-                    "protocolVersion": self.protocol_version,
-                    "capabilities": {},
-                    "clientInfo": {"name": "safesink", "version": _client_version()},
-                },
-                timeout_seconds=self.startup_timeout_seconds,
-            )
-            if not isinstance(result, dict):
-                raise McpClientError("MCP initialize result must be an object")
-            self.negotiated_protocol_version = str(result.get("protocolVersion", ""))
-            self.server_info = _object(result.get("serverInfo"))
-            self.server_capabilities = _object(result.get("capabilities"))
-            self.notify("notifications/initialized")
+            if self._start_modern():
+                return
+            self._start_legacy()
         except BaseException:
             self.close()
             raise
+
+    # -- era detection -----------------------------------------------------
+
+    def _start_modern(self) -> bool:
+        """Probe ``server/discover``; return False when the server is legacy.
+
+        On stdio there is no status code to inspect, so a recognised modern error
+        means modern and anything else (an error, silence, a timeout) means the
+        server predates stateless MCP.
+        """
+        if not wants_modern(self.protocol_version):
+            return False
+        cached = _ERA_CACHE.get(tuple(self.command))
+        if cached == "legacy":
+            return False
+        preferred = (
+            self.protocol_version
+            if is_modern_version(self.protocol_version)
+            else SUPPORTED_PROTOCOL_VERSIONS[0]
+        )
+        try:
+            result = self._discover(preferred)
+        except McpProtocolError as error:
+            negotiated = _negotiate_probe_version(error)
+            if negotiated is None or not is_modern_version(negotiated):
+                _ERA_CACHE[tuple(self.command)] = "legacy"
+                return False
+            try:
+                result = self._discover(negotiated)
+            except McpClientError:
+                return False
+            preferred = negotiated
+        except McpClientError:
+            _ERA_CACHE[tuple(self.command)] = "legacy"
+            return False
+        if not isinstance(result, dict):
+            _ERA_CACHE[tuple(self.command)] = "legacy"
+            return False
+        supported = result.get("supportedVersions")
+        chosen = pick_common_version(supported, preferred)
+        if chosen is None or not is_modern_version(chosen):
+            _ERA_CACHE[tuple(self.command)] = "legacy"
+            return False
+        if chosen != preferred:
+            try:
+                result = self._discover(chosen)
+            except McpClientError:
+                return False
+        _ERA_CACHE[tuple(self.command)] = "modern"
+        self.era = "modern"
+        self.negotiated_protocol_version = chosen
+        self.server_info = _server_info(result if isinstance(result, dict) else {})
+        self.server_capabilities = _object(
+            (result or {}).get("capabilities") if isinstance(result, dict) else {}
+        )
+        return True
+
+    def _discover(self, version: str) -> Any:
+        return self.request(
+            "server/discover",
+            {"_meta": modern_meta(version, _client_version())},
+            timeout_seconds=self.probe_timeout_seconds,
+        )
+
+    def _start_legacy(self) -> None:
+        result = self.request(
+            "initialize",
+            {
+                "protocolVersion": self.protocol_version
+                if not wants_modern(self.protocol_version)
+                else SUPPORTED_PROTOCOL_VERSIONS[-1],
+                "capabilities": {},
+                "clientInfo": {"name": "safesink", "version": _client_version()},
+            },
+            timeout_seconds=self.startup_timeout_seconds,
+        )
+        if not isinstance(result, dict):
+            raise McpClientError("MCP initialize result must be an object")
+        self.era = "legacy"
+        self.negotiated_protocol_version = str(result.get("protocolVersion", ""))
+        self.server_info = _object(result.get("serverInfo"))
+        self.server_capabilities = _object(result.get("capabilities"))
+        self.notify("notifications/initialized")
 
     def _read_stdout(self) -> None:
         assert self.process is not None and self.process.stdout is not None
@@ -193,8 +298,8 @@ class McpStdioClient:
             "id": request_id,
             "method": method,
         }
-        if params is not None:
-            message["params"] = params
+        if params is not None or self.era == "modern":
+            message["params"] = self._params(params)
         self._write(message)
         deadline = time.monotonic() + (
             timeout_seconds
@@ -237,13 +342,23 @@ class McpStdioClient:
                 error_value = response["error"]
                 if isinstance(error_value, dict):
                     code = error_value.get("code", "unknown")
-                    raise McpClientError(
-                        f"MCP error {code}; server-provided message omitted from report"
+                    raise McpProtocolError(
+                        code,
+                        error_value.get("data"),
+                        f"MCP error {code}; server-provided message omitted from report",
                     )
                 raise McpClientError("MCP error; server-provided value omitted from report")
             if "result" not in response:
                 raise McpClientError("MCP response contains neither result nor error")
             return response["result"]
+
+    def _params(self, params: dict[str, Any] | None) -> dict[str, Any] | None:
+        if self.era != "modern":
+            return params
+        return with_meta(
+            params, self.negotiated_protocol_version or SUPPORTED_PROTOCOL_VERSIONS[0],
+            _client_version(),
+        )
 
     def list_tools(self, *, max_pages: int = 100) -> list[dict[str, Any]]:
         cursor: str | None = None

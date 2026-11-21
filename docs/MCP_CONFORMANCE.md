@@ -271,6 +271,36 @@ is invisible. Both drivers are optional - install `safesink[postgres]` or
 `safesink[mysql]`; a missing driver is reported as such rather than silently
 skipping the boundary.
 
+## Protocol revisions
+
+MCP changed shape in the `2026-07-28` revision: the `initialize` handshake is
+gone, every request carries the protocol version and client identity in `_meta`,
+servers must implement `server/discover`, and an unsupported version is answered
+with `UnsupportedProtocolVersionError` (`-32022`) listing what the server speaks.
+
+SafeSink is dual-era and defaults to `"protocolVersion": "auto"`:
+
+1. On stdio it probes `server/discover`. A recognised modern error means a modern
+   server: SafeSink retries with a mutually supported version and then runs
+   statelessly, adding `_meta` to every request.
+2. No response, a timeout, or any other error means a pre-2026 server: SafeSink
+   performs the `2025-11-25` handshake exactly as before.
+3. On streamable HTTP it posts a modern request first, inspects a `400` for a
+   modern error body, and only then falls back to `initialize`. Modern requests
+   carry `MCP-Protocol-Version`, `Mcp-Method` and, for `tools/call`, `Mcp-Name`,
+   with no session header.
+
+The era is cached per server command for the life of the process. Pin it when you
+want a deterministic answer:
+
+```json
+"server": {"command": ["npx", "-y", "your-server"], "protocolVersion": "2026-07-28"}
+```
+
+`"2025-11-25"` forces the handshake; `"auto"` is the default. The report records
+`server.requested_protocol_version` and what was actually negotiated as
+`server.negotiated_protocol_version`.
+
 ## Remote servers over streamable HTTP
 
 Not every server is a local command. Point `mcp-check` at a URL instead of a

@@ -2,6 +2,36 @@
 
 All notable changes will be documented here. This project follows Semantic Versioning and the Keep a Changelog structure.
 
+## 0.6.0 - 2026-11-21
+
+### Added
+
+- The `2026-07-28` MCP revision: `server/discover`, stateless per-request `_meta`
+  (protocol version, client identity, capabilities), `UnsupportedProtocolVersionError`
+  (`-32022`) negotiation, typed results (`resultType`), cacheable list results
+  (`ttlMs`, `cacheScope`) and the `MCP-Protocol-Version` / `Mcp-Method` / `Mcp-Name`
+  headers on streamable HTTP.
+- `safesink-mcp` serves both eras: a legacy `initialize` client and a stateless
+  modern one, and returns `structuredContent` with an `outputSchema` per tool so an
+  agent can consume results without parsing prose.
+
+- `safesink audit`: reads a host config (Claude Desktop, VS Code, Cursor, or
+  `.mcp.json`), builds a manifest per configured server, verifies each, and reports
+  verdict, score, findings and inconclusive counts per server. A server that cannot
+  start is `error`, not a pass, and one failure never hides the others.
+- `server.json` for the official MCP Registry, with `docs/REGISTRY.md` covering the
+  owner-only publish step.
+- `docs/USE_CASES.md`: five personas, the command each runs, and the honest limit of
+  each result; `safesink-mcp` now also returns `structuredContent` for agents.
+
+### Changed
+
+- `server.protocolVersion` and `build_manifest`/`mcp-scan` default to `"auto"`:
+  probe `server/discover`, use the newest common version, and fall back to the
+  `2025-11-25` handshake for older servers. Pin a revision for determinism.
+- Reports now distinguish `server.requested_protocol_version` from
+  `server.negotiated_protocol_version`.
+
 ## 0.5.0 - 2026-11-21
 
 This release turns a checker that works on fixtures into a gate a team can adopt on
