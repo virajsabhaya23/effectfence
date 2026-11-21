@@ -118,6 +118,11 @@ def build_parser(prog: str = "safesink") -> argparse.ArgumentParser:
             "observed boundary is a real database"
         ),
     )
+    check.add_argument(
+        "--capture-stderr",
+        action="store_true",
+        help="include a bounded, redacted server stderr excerpt in the report",
+    )
     check.add_argument("--protocol-version", default="2025-11-25")
     check.add_argument("--startup-timeout", type=float, default=60.0)
     check.add_argument(
@@ -141,6 +146,11 @@ def build_parser(prog: str = "safesink") -> argparse.ArgumentParser:
     mcp.add_argument("--junit", help="JUnit XML path")
     mcp.add_argument("--sarif", help="SARIF path")
     mcp.add_argument("--verbose", action="store_true", help="print per-case verdicts")
+    mcp.add_argument(
+        "--capture-stderr",
+        action="store_true",
+        help="include a bounded, redacted server stderr excerpt in the report",
+    )
 
     scan = commands.add_parser(
         "mcp-scan",
@@ -257,9 +267,12 @@ def main(argv: list[str] | None = None, prog: str = "safesink") -> int:
                 protocol_version=arguments.protocol_version,
                 sqlite_queries=sqlite_queries,
                 include_sandbox_observer=arguments.sandbox_observer,
+                capture_stderr=arguments.capture_stderr,
             )
             write_manifest(manifest, manifest_path)
-            report = verify_manifest(manifest_path)
+            report = verify_manifest(
+                manifest_path, capture_stderr=arguments.capture_stderr
+            )
         except ScanError as error:
             _die(parser, str(error))
             return 2
@@ -300,7 +313,9 @@ def main(argv: list[str] | None = None, prog: str = "safesink") -> int:
 
     if arguments.cmd == "mcp-verify":
         try:
-            report = verify_manifest(arguments.manifest)
+            report = verify_manifest(
+                arguments.manifest, capture_stderr=arguments.capture_stderr
+            )
         except ManifestError as error:
             _die(parser, str(error), hint="see docs/MCP_CONFORMANCE.md#manifest")
         except FileNotFoundError:

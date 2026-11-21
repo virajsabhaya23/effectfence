@@ -54,6 +54,9 @@
         "maxListPages": {
           "type": "integer",
           "minimum": 1
+        },
+        "captureStderr": {
+          "type": "boolean"
         }
       }
     },

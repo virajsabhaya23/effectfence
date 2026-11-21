@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import platform
+import re
 import subprocess
 import time
 from pathlib import Path
@@ -44,7 +45,9 @@ def load_manifest(path: str | Path) -> tuple[dict[str, Any], Path]:
     return manifest, manifest_path
 
 
-def verify_manifest(path: str | Path) -> dict[str, Any]:
+def verify_manifest(
+    path: str | Path, *, capture_stderr: bool = False
+) -> dict[str, Any]:
     # Imported lazily: this module is imported while ``safesink/__init__`` runs,
     # so the package version does not exist yet at module-import time.
     from . import __version__ as package_version
@@ -76,7 +79,11 @@ def verify_manifest(path: str | Path) -> dict[str, Any]:
     ]
     started = time.time()
     results: list[dict[str, Any]] = []
-    fatal_error: str | None = None
+    # A fatal error has to say where it happened: a 40-case scan that dies on
+    # case 31 should not read like one that never started.
+    fatal_error: dict[str, Any] | None = None
+    phase = "startup"
+    current_case: str | None = None
     tools: list[dict[str, Any]] = []
     client: McpStdioClient | None = None
     try:
@@ -90,9 +97,12 @@ def verify_manifest(path: str | Path) -> dict[str, Any]:
             max_message_bytes=int(server.get("maxMessageBytes", 8 * 1024 * 1024)),
         )
         client.start()
+        phase = "tools/list"
         tools = client.list_tools(max_pages=int(server.get("maxListPages", 100)))
         indexed_tools = {tool["name"]: tool for tool in tools}
+        phase = "case"
         for case in manifest["cases"]:
+            current_case = case["id"]
             results.append(
                 _run_case(
                     case,
@@ -104,9 +114,14 @@ def verify_manifest(path: str | Path) -> dict[str, Any]:
                 )
             )
     except (McpClientError, ObserverError, OSError, ValueError) as error:
-        fatal_error = _safe_error(error)
+        fatal_error = {
+            "message": _safe_error(error),
+            "phase": phase,
+            "case": current_case,
+        }
     finally:
         stderr_present = bool(client and client.stderr_tail)
+        want_stderr = capture_stderr or bool(server.get("captureStderr", False))
         server_metadata = {
             "name": client.server_info.get("name") if client else None,
             "version": client.server_info.get("version") if client else None,
@@ -116,6 +131,8 @@ def verify_manifest(path: str | Path) -> dict[str, Any]:
             ),
             "stderr_present": stderr_present,
         }
+        if want_stderr and client and client.stderr_tail:
+            server_metadata["stderrExcerpt"] = _stderr_excerpt(client.stderr_tail)
         if client:
             client.close()
 
@@ -742,6 +759,8 @@ def _validate_manifest(manifest: dict[str, Any]) -> None:
     _command(server.get("command"), "server.command")
     if server.get("transport", "stdio") != "stdio":
         raise ManifestError("server.transport must be 'stdio'")
+    if "captureStderr" in server and not isinstance(server["captureStderr"], bool):
+        raise ManifestError("server.captureStderr must be a boolean")
     cases = manifest.get("cases")
     if not isinstance(cases, list) or not cases:
         raise ManifestError("cases must be a non-empty array")
@@ -880,6 +899,20 @@ def _string_map(value: Any, label: str) -> dict[str, str]:
 def _resolve_path(base: Path, value: str) -> Path:
     path = Path(value)
     return path.resolve() if path.is_absolute() else (base / path).resolve()
+
+
+# Bounded, and redacted even when the user opted in: server stderr is where
+# credentials leak, and an excerpt is for diagnosis, not for copying secrets into
+# an artifact that gets uploaded.
+_SECRET_IN_STDERR = re.compile(
+    r"(?i)\b(token|secret|password|passwd|api[_-]?key|authorization|bearer)"
+    r"(\s*[:=]\s*)(\S+)"
+)
+
+
+def _stderr_excerpt(text: str, limit: int = 4000) -> str:
+    redacted = _SECRET_IN_STDERR.sub(lambda match: f"{match.group(1)}{match.group(2)}[redacted]", text)
+    return redacted[-limit:]
 
 
 def _safe_error(error: BaseException) -> str:
