@@ -35,5 +35,5 @@
       "setup": {"command": ["python3", "reset_fixture.py", ".effectfence-state"]}
     }
   ],
-  "policy": {"minimumToolCoverage": 0.6}
+  "policy": {"minimumToolCoverage": 0.4}
 }

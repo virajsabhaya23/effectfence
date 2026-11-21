@@ -7,6 +7,15 @@ All notable changes will be documented here. This project follows Semantic Versi
 - Renamed distribution to `safesink` (clean break from `effectfence` per issue #1). `pip install safesink`, `import safesink`, CLI `safesink`. `effectfence` remains as a deprecated alias (`import effectfence` warns, `effectfence` CLI forwards to `safesink`). Strategy `safesink` is an alias for `effectfence`; env vars `SAFESINK_*` preferred with `EFFECTFENCE_*` fallback.
 - New package `safesink` mirrors `effectfence` 0.2.x; wheel now contains both for transition. `CITATION.cff` and `pyproject.toml` point at `virajsabhaya23/effectfence`, the repository that hosts this code.
 
+## 0.4.1 - 2026-11-21
+
+- Fixed the shipped conformance examples: adding the `read_missing_file` fixture
+tool raised the advertised tool count to six, so `passing.json` failed its own
+coverage policy (and the `mcp-conformance` workflow) instead of passing. The
+example now also covers `expectToolError`, and `failing.json` fails only on the
+three dishonest tools rather than on coverage. A test now runs both shipped
+examples and asserts their documented verdicts.
+
 ## 0.4.0 - 2026-11-21
 
 - Added `safesink mcp-check <command>`: scan and verify an MCP server in one

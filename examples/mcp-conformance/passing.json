@@ -27,6 +27,13 @@
       "tool": "upsert_record",
       "arguments": {"id": "customer-7", "value": "active"},
       "setup": {"command": ["python3", "reset_fixture.py", ".effectfence-state"]}
+    },
+    {
+      "id": "declared-error-is-expected",
+      "tool": "read_missing_file",
+      "arguments": {"path": "does-not-exist.txt"},
+      "expectToolError": true,
+      "setup": {"command": ["python3", "reset_fixture.py", ".effectfence-state"]}
     }
   ],
   "policy": {"minimumToolCoverage": 0.4}

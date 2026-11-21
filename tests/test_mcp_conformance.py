@@ -148,6 +148,26 @@ class McpConformanceTests(unittest.TestCase):
         )
         self.assertEqual(report["verdict"], "fail")
 
+    def test_shipped_examples_behave_as_documented(self) -> None:
+        examples = ROOT / "examples" / "mcp-conformance"
+        passing = verify_manifest(examples / "passing.json")
+        self.assertEqual(passing["verdict"], "pass")
+        failing = verify_manifest(examples / "failing.json")
+        self.assertEqual(failing["verdict"], "fail")
+        codes = {
+            violation["code"]
+            for case in failing["cases"]
+            for violation in case["violations"]
+        }
+        self.assertEqual(
+            codes,
+            {
+                "READ_ONLY_HINT_MISMATCH",
+                "IDEMPOTENT_HINT_MISMATCH",
+                "NON_DESTRUCTIVE_HINT_MISMATCH",
+            },
+        )
+
     def test_reports_are_valid_xml_and_sarif(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
