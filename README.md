@@ -360,3 +360,14 @@ measure corpus authoring, not detection of real systems).
 
 The deprecated `effectfence` import path and console script still work and
 forward to `safesink`.
+
+## Badge
+
+```bash
+safesink badge --report out/mcp/report.json --out badge.svg
+```
+
+The SVG shows the verdict and score for one pinned server version. It is not a
+certification; `safesink sign` issues the certificate. See
+[`docs/LEADERBOARD.md`](docs/LEADERBOARD.md) for the badge and the nightly scan
+of the pinned servers in `servers.json`.

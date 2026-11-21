@@ -204,6 +204,87 @@ def write_sarif_report(report: dict[str, Any], path: str | Path) -> None:
     destination.write_text(json.dumps(sarif, indent=2) + "\n", encoding="utf-8")
 
 
+BADGE_COLORS = {
+    "pass": "#4c1",
+    "inconclusive": "#dfb317",
+    "fail": "#e05d44",
+}
+
+
+def render_badge_svg(
+    verdict: str, score: object | None = None, *, label: str = "safesink"
+) -> str:
+    """A Shields-style SVG so an author can embed their own result.
+
+    It deliberately states the verdict and the score, not a certification: the
+    color is the same three-state vocabulary as the report.
+    """
+    import html
+
+    value = str(verdict)
+    if score is not None:
+        value = f"{verdict} {score}"
+    label_text = html.escape(label)
+    value_text = html.escape(value)
+    color = BADGE_COLORS.get(str(verdict), "#9f9f9f")
+    label_width = 7 * len(label) + 12
+    value_width = 7 * len(value) + 12
+    total = label_width + value_width
+    return f"""<svg xmlns="http://www.w3.org/2000/svg" width="{total}" height="20" role="img" aria-label="{label_text}: {value_text}">
+  <title>{label_text}: {value_text}</title>
+  <rect width="{label_width}" height="20" fill="#555"/>
+  <rect x="{label_width}" width="{value_width}" height="20" fill="{color}"/>
+  <g fill="#fff" font-family="DejaVu Sans, Verdana, sans-serif" font-size="11">
+    <text x="{label_width / 2}" y="14" text-anchor="middle">{label_text}</text>
+    <text x="{label_width + value_width / 2}" y="14" text-anchor="middle">{value_text}</text>
+  </g>
+</svg>
+"""
+
+
+def render_leaderboard_html(data: dict[str, Any]) -> str:
+    """A static page over `data/leaderboard.json`, with the honesty rules inline."""
+    import html
+
+    entries = data.get("entries", [])
+    rows = []
+    for entry in entries:
+        rows.append(
+            "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td>"
+            "<td>{}</td><td>{}</td><td>{}</td></tr>".format(
+                html.escape(str(entry.get("server", ""))),
+                html.escape(str(entry.get("version", ""))),
+                html.escape(str(entry.get("tools", ""))),
+                html.escape(str(entry.get("cases", ""))),
+                html.escape(str(entry.get("findings", ""))),
+                html.escape(str(entry.get("inconclusive", ""))),
+                html.escape(str(entry.get("verdict", ""))),
+                html.escape(str(entry.get("score", ""))),
+            )
+        )
+    generated = html.escape(str(data.get("generatedAt") or "never"))
+    return f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<title>SafeSink leaderboard</title>
+<style>
+body{{font-family:system-ui,sans-serif;max-width:60rem;margin:2rem auto;padding:0 1rem}}
+table{{border-collapse:collapse;width:100%}}
+th,td{{text-align:left;padding:.4rem .6rem;border-bottom:1px solid #ddd}}
+.pass{{color:#1a7f37}}.fail{{color:#b42318}}.inconclusive{{color:#8a6100}}
+</style></head><body>
+<h1>SafeSink leaderboard</h1>
+<p>Generated {generated}. Every row is a pinned version scanned with
+<code>safesink mcp-check</code>; the raw report is linked from the workflow run.</p>
+<p><strong>Zero findings is the expected result for a trusted server.</strong>
+Detection is proven by the deliberately dishonest fixture, not by this table. A
+pass here is not a security certification.</p>
+<table><thead><tr><th>Server</th><th>Version</th><th>Tools</th><th>Cases</th>
+<th>Findings</th><th>Inconclusive</th><th>Verdict</th><th>Score</th></tr></thead>
+<tbody>{''.join(rows) or '<tr><td colspan="8">No scans recorded yet.</td></tr>'}</tbody>
+</table></body></html>
+"""
+
+
 def render_markdown_report(report: dict[str, Any]) -> str:
     """A reviewable summary for a pull request, where nobody opens artifacts."""
     verdict = str(report.get("verdict", "unknown"))
