@@ -4,14 +4,16 @@
 
 MCP tool annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`,
 `openWorldHint`) are untrusted hints: nothing stops a server from declaring a
-tool read-only while it writes files, or idempotent while every retry charges
-the customer twice. SafeSink calls the tool, observes the state it actually
-changed inside an explicit filesystem, SQLite, or HTTP JSON boundary, and reports
-where the declaration and the observed effect disagree.
+tool read-only while it writes files, or idempotent while every retry charges the
+customer twice. SafeSink calls the tool, observes the state it actually changed
+inside an explicit filesystem, SQLite, or HTTP JSON boundary, and reports where
+the declaration and the observed effect disagree.
 
-There is one product: the MCP conformance verifier (`safesink mcp-verify`,
-`safesink mcp-scan`). The older crash/retry schedule simulator is frozen and
-available only as `safesink-legacy` — see [Frozen crash/retry simulator](#frozen-crashretry-simulator).
+One command, no manifest, no server changes:
+
+```bash
+safesink mcp-check -- npx -y @modelcontextprotocol/server-filesystem "$PWD/sandbox"
+```
 
 ## Install
 
@@ -35,24 +37,39 @@ PEP 517 build backend, so the build works offline.
 
 ## Quick start
 
-Verify the honest fixture and emit JSON, JUnit, and SARIF evidence:
+Point it at any stdio MCP server:
 
 ```bash
-safesink mcp-verify examples/mcp-conformance/passing.json \
+mkdir -p sandbox
+safesink mcp-check \
+  --sandbox sandbox \
   --out out/mcp/report.json \
   --junit out/mcp/junit.xml \
-  --sarif out/mcp/report.sarif
+  --sarif out/mcp/report.sarif \
+  -- npx -y @modelcontextprotocol/server-filesystem "$PWD/sandbox"
 ```
 
-The deliberately dishonest fixture exits with status 2 and demonstrates the
-three primary findings:
+`mcp-check` starts the server, reads `tools/list`, synthesizes minimal arguments
+from each tool's `inputSchema`, seeds the sandbox with probe fixtures those
+arguments can refer to, skips tools declaring `destructiveHint: true`, and
+verifies what changed. The command goes after `--` so its own flags are not
+parsed by `safesink`.
+
+For a server that needs a curated argument per tool, write a manifest and use
+`mcp-verify` instead:
 
 ```bash
-safesink mcp-verify examples/mcp-conformance/failing.json \
-  --out out/mcp/failing.json
+safesink mcp-verify my-manifest.json --out out/mcp/report.json
 ```
 
-Use the same verifier from Python:
+The honest fixture and the deliberately dishonest one show both outcomes:
+
+```bash
+safesink mcp-verify examples/mcp-conformance/passing.json   # exit 0
+safesink mcp-verify examples/mcp-conformance/failing.json   # exit 2
+```
+
+From Python:
 
 ```python
 from safesink import verify_manifest
@@ -61,35 +78,19 @@ report = verify_manifest("manifest.json")
 print(report["verdict"], report["certificateSha256"])
 ```
 
-## Scan a server you have no manifest for
+## Verdicts and exit codes
 
-`mcp-scan` connects to a server, reads `tools/list`, and synthesizes a manifest
-from each tool's advertised `inputSchema`, so auditing an unfamiliar server does
-not require hand-authoring a case per tool.
+| Verdict | Exit | Meaning |
+| --- | --- | --- |
+| `pass` | 0 | every case was exercised and no declared effect was contradicted |
+| `inconclusive` | 3 | nothing was contradicted, but at least one case could not be verified |
+| `fail` | 2 | a declared effect was contradicted, or the run could not be trusted |
 
-```bash
-mkdir -p sandbox
-safesink mcp-scan \
-  --observer-root sandbox \
-  --out out/mcp/generated.json \
-  -- npx -y @modelcontextprotocol/server-filesystem "$PWD/sandbox"
-
-safesink mcp-verify out/mcp/generated.json --out out/mcp/report.json
-```
-
-The server command goes after `--` so its own flags are not parsed by `safesink`.
-
-Tools declaring `destructiveHint: true` are **skipped by default** and listed
-under `generated.skipped`; pass `--include-destructive` to audit them, and only
-against a disposable sandbox. Declared annotations are copied into each case
-`contract`, so the generated manifest checks the server against its own claims.
-
-Argument synthesis honours `const`, `enum`, `default`, numeric minimums, array
-`minItems`, nullable unions, and nested objects, and it distinguishes file paths
-from directory paths using the property description and tool name. Generated
-arguments are still a heuristic: triage `TOOL_ERROR_EXPECTATION_MISMATCH`
-results before reporting them, because an unsatisfiable generated argument can
-look like a conformance finding.
+`inconclusive` is a first-class outcome, not a soft pass. It covers rejected
+synthesized arguments, observers whose state changes on its own, and ambiguous
+results the observation boundary cannot classify. A case is only `pass` when it
+has no violations **and** no unresolved evidence, so CI never reports an
+unverified case as verified.
 
 ## What it checks
 
@@ -103,24 +104,49 @@ look like a conformance finding.
 | `TOOL_NOT_LISTED` | a case targets a tool that `tools/list` never advertised |
 | `TOOL_COVERAGE_BELOW_MINIMUM` | too few advertised tools are covered by cases |
 
-Two behaviours keep false positives out of reports:
+Two behaviours keep false findings out of reports:
 
 - **Observer control rounds.** Every case (and every ambiguous-result trial) runs
   matched no-tool observation rounds first. A delta that reproduces without the
   tool is reported as `OBSERVER_OR_BACKGROUND_INTERFERENCE` and is not blamed on
-  the tool; the case becomes inconclusive rather than passing or failing.
-- **Inconclusive is not a pass.** A case passes only with no violations *and* no
-  unresolved evidence, so checks that could not be completed are never reported
-  as verified.
+  the tool.
+- **Argument-synthesis limits are inconclusive.** When `mcp-scan` generated the
+  arguments and the server rejects them, the result is
+  `TOOL_ERROR_ON_GENERATED_ARGUMENTS`, not a conformance finding. Hand-written
+  cases that are rejected still fail.
 
 Ambiguous-result schedules (`ambiguousResultFault`) repeat a call under
 `drop-result-after-response` or `timeout-before-send` and classify the outcome as
 committed-result-lost, no-effect-timeout, duplicate-on-retry, or explicitly
 unclassified.
 
-## CI
+## Validation against real servers
 
-A composite action is included:
+Measured on 2026-11-21 with the released upstream servers, `safesink mcp-check`,
+default settings (destructive tools skipped):
+
+| Server | Version | Tools | Cases | Findings | Inconclusive | Verdict |
+| --- | --- | --- | --- | --- | --- | --- |
+| `@modelcontextprotocol/server-filesystem` | 2.4.0 | 16 | 13 | 0 | 1 | inconclusive (exit 3) |
+| `@modelcontextprotocol/server-memory` | 2.2.1 | 9 | 6 | 0 | 0 | pass (exit 0) |
+| `@modelcontextprotocol/server-sequential-thinking` | 2.2.0 | 1 | 1 | 0 | 0 | pass (exit 0) |
+
+The single inconclusive case is `copy_file`, whose second identical call is
+rejected because the first call created the destination; the tool's
+`idempotentHint: true` therefore remains unverified rather than violated.
+
+These are trusted servers, so zero findings is the expected result: the table
+shows that the scanner does not manufacture findings, not that it can catch a
+liar. Detection is covered by the deliberately dishonest fixture, where the
+suite asserts `READ_ONLY_HINT_MISMATCH`, `IDEMPOTENT_HINT_MISMATCH`, and
+`NON_DESTRUCTIVE_HINT_MISMATCH`.
+
+An earlier revision reported 5 of these 13 cases as conformance failures because
+synthesized arguments pointed at directories and files that did not exist. That
+false-positive rate is why generated arguments are now seeded from probe fixtures
+and why a rejected generated call is inconclusive.
+
+## CI
 
 ```yaml
 - uses: actions/checkout@v7
@@ -132,15 +158,20 @@ A composite action is included:
     sarif: out/mcp/report.sarif
 ```
 
-The command exits `0` on pass and `2` on fail, so it works as a plain gate too.
+Pin a full commit SHA in high-assurance environments. The action verifies a
+manifest; use `mcp-check` in the job directly if you have no manifest yet. JUnit
+marks unverifiable cases as `skipped`, not failed, matching the verdicts above.
 
 ## Security model
 
 - Commands are executed without a shell, as arrays, with a restricted
-  environment; only variables named in `server.inheritEnv` are passed through.
+  environment (`PATH` plus explicitly inherited variables).
 - HTTP observers are host-allowlisted and follow no redirects.
 - Argument and output values are redacted by default, and sensitive observer
   digests are excluded from reports.
+- `mcp-check` only ever mutates the sandbox directory you give it, and skips
+  tools that declare themselves destructive unless you pass
+  `--include-destructive`.
 - Only configured observers define the observable boundary. Snapshot comparison
   cannot detect unobserved side effects, and it cannot prove that an external
   read occurred.
@@ -171,11 +202,3 @@ measure corpus authoring, not detection of real systems).
 
 The deprecated `effectfence` import path and console script still work and
 forward to `safesink`.
-
-## Citation
-
-```bash
-safesink citation --format bibtex
-```
-
-or use [`CITATION.cff`](CITATION.cff). No archival DOI is claimed.

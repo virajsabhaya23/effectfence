@@ -63,6 +63,5 @@ codes (`0` safe/pass, `2` unsafe/fail), and report fields are unchanged from
 - The live adapter covers one boundary (after sink commit, before offset commit)
   on one stack (Apache Kafka + PostgreSQL) on a POSIX host.
 
-See [EFFECT_SAFETY_PROTOCOL.md](EFFECT_SAFETY_PROTOCOL.md) and
-[PRIOR_ART.md](PRIOR_ART.md) for the original protocol notes and prior-art
-record, both retained as historical documents.
+See [EFFECT_SAFETY_PROTOCOL.md](EFFECT_SAFETY_PROTOCOL.md) for the original
+protocol notes, retained as a historical document.

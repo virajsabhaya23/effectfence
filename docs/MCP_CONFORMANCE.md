@@ -11,6 +11,22 @@ does not turn those hints into a universal security boundary.
 
 ## Quick start
 
+No manifest, no server changes:
+
+```bash
+mkdir -p sandbox
+safesink mcp-check --sandbox sandbox --out out/mcp/report.json \
+  -- npx -y @modelcontextprotocol/server-filesystem "$PWD/sandbox"
+```
+
+`mcp-check` starts the server, reads `tools/list`, synthesizes arguments from
+each `inputSchema`, seeds the sandbox with probe fixtures, skips tools that
+declare `destructiveHint: true`, verifies, and writes the report. Pass
+`--manifest-out` to keep the generated manifest and `--include-destructive` to
+call destructive tools against a disposable sandbox.
+
+With a hand-written manifest:
+
 ```bash
 python -m pip install .
 safesink mcp-verify examples/mcp-conformance/passing.json \
@@ -83,6 +99,31 @@ each declaration source as `mcp-tool-annotation` or `manifest-contract`.
 SafeSink also fails unexpected MCP tool errors, unknown tools, execution
 errors, and tool-coverage policy violations.
 
+### Verdicts
+
+A report has one of three verdicts, and the CLI maps them to exit codes:
+
+| Verdict | Exit | Meaning |
+| --- | --- | --- |
+| `pass` | 0 | every case ran and no declaration was contradicted |
+| `inconclusive` | 3 | nothing was contradicted, but at least one case was not verified |
+| `fail` | 2 | a declaration was contradicted, or the run could not be trusted |
+
+`inconclusive` covers observer/background interference, ambiguous results the
+boundary cannot classify, and rejected synthesized arguments. JUnit records these
+cases as `skipped`. A case passes only with no violations and no unresolved
+evidence, so a CI gate never treats unverified behavior as verified.
+
+### Generated arguments
+
+`mcp-scan` (and therefore `mcp-check`) marks each case it synthesized with
+`generatedArguments: true`. If the server rejects those arguments, the case is
+reported as `TOOL_ERROR_ON_GENERATED_ARGUMENTS` and the verdict is
+`inconclusive`: the declared behavior was never exercised, which is a limit of
+the harness rather than a finding about the server. A rejection in a
+hand-written case is still `TOOL_ERROR_EXPECTATION_MISMATCH`. Triage generated
+cases before reporting them.
+
 ### Ambiguous result retries
 
 Set `ambiguousResultFault` on a case to test the failure window where the
@@ -124,8 +165,10 @@ reports. Only argument keys/types and MCP content types are retained.
 from safesink import verify_manifest
 
 report = verify_manifest("safesink.mcp.json")
-if report["verdict"] != "pass":
+if report["verdict"] == "fail":
     raise RuntimeError(report["cases"])
+if report["verdict"] == "inconclusive":
+    print("nothing contradicted, but some cases were not verified")
 ```
 
 The API returns the same JSON-serializable report used by the CLI. JUnit and

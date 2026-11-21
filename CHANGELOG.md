@@ -9,8 +9,30 @@ All notable changes will be documented here. This project follows Semantic Versi
 
 ## Unreleased
 
+- Added `safesink mcp-check <command>`: scan and verify an MCP server in one
+  step, with a temporary sandbox, probe fixtures, destructive tools skipped, and
+  a report. This is now the documented first-run path; `mcp-scan` and
+  `mcp-verify` remain for curated manifests and CI.
+- `mcp-scan` now seeds the observed sandbox with probe fixtures (a text file, a
+  valid 1x1 PNG, and a directory with a nested file) and points synthesized file
+  arguments at them, distinguishes source from destination arguments, and marks
+  every generated case with `generatedArguments: true`. On
+  `@modelcontextprotocol/server-filesystem` 2.4.0 this removed 5 false findings
+  out of 13 cases; the remaining case is reported as inconclusive.
+- Added a third verdict, `inconclusive`, with exit code 3, for runs where nothing
+  was contradicted but at least one case could not be verified. `pass` is 0 and
+  `fail` stays 2. Generated cases whose arguments the server rejects are
+  reported as `TOOL_ERROR_ON_GENERATED_ARGUMENTS` instead of a
+  `TOOL_ERROR_EXPECTATION_MISMATCH` finding, and JUnit writes those cases as
+  `skipped` rather than failed.
+- `IDEMPOTENCY_NOT_EXERCISED` is now only reported for `idempotentHint: true`,
+  instead of also for servers that explicitly declare `false`.
+- Removed the citation/adoption scaffolding (`safesink citation`,
+  `CITATION.cff`, `docs/CITING.md`, `docs/ADOPTION_EVIDENCE.md`,
+  `docs/PRIOR_ART.md`, `BUILD_REPORT.md`) so the repository describes one tool
+  instead of an originality record.
 - Split the product in two: `safesink` now exposes only the MCP conformance
-  verifier (`mcp-verify`, `mcp-scan`, `citation`). The crash/retry simulator,
+  verifier (`mcp-check`, `mcp-verify`, `mcp-scan`). The crash/retry simulator,
   SQLite effect ledger, reference sinks, benchmark corpus, and live
   Kafka/PostgreSQL adapter moved to the frozen `safesink.legacy` subpackage and
   are reachable through the separate `safesink-legacy` console script. See
