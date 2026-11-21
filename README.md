@@ -17,23 +17,20 @@ safesink mcp-check -- npx -y @modelcontextprotocol/server-filesystem "$PWD/sandb
 
 ## Install
 
-`safesink` is not on PyPI yet, so `pip install safesink` fails. Install from the
-repository instead:
-
 ```bash
-python -m pip install "git+https://github.com/virajsabhaya23/effectfence.git"
+python -m pip install safesink
 ```
 
-or, from a clone:
+Python 3.10+; no runtime dependencies. To work on it, from a clone:
 
 ```bash
 git clone https://github.com/virajsabhaya23/effectfence.git
 cd effectfence
-python -m pip install .
+python -m pip install -e .
 ```
 
-Python 3.10+; no runtime dependencies. The repository ships a dependency-free
-PEP 517 build backend, so the build works offline.
+The repository ships a dependency-free PEP 517 build backend, so the build works
+offline.
 
 ## Quick start
 

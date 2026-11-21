@@ -7,7 +7,11 @@ All notable changes will be documented here. This project follows Semantic Versi
 - Renamed distribution to `safesink` (clean break from `effectfence` per issue #1). `pip install safesink`, `import safesink`, CLI `safesink`. `effectfence` remains as a deprecated alias (`import effectfence` warns, `effectfence` CLI forwards to `safesink`). Strategy `safesink` is an alias for `effectfence`; env vars `SAFESINK_*` preferred with `EFFECTFENCE_*` fallback.
 - New package `safesink` mirrors `effectfence` 0.2.x; wheel now contains both for transition. `CITATION.cff` and `pyproject.toml` point at `virajsabhaya23/effectfence`, the repository that hosts this code.
 
-## 0.4.1 - 2026-11-21
+## 0.4.2 - 2026-11-21
+
+- Documentation-only release so the PyPI project page is correct: the README now
+  documents `pip install safesink` as the install path, since 0.4.0 and 0.4.1 are
+  published.
 
 - Fixed the shipped conformance examples: adding the `read_missing_file` fixture
 tool raised the advertised tool count to six, so `passing.json` failed its own
