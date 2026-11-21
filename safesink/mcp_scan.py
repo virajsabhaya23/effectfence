@@ -83,8 +83,9 @@ _MEDIA_HINTS = ("media", "image", "photo", "picture", "png", "jpeg", "jpg")
 
 # Roles: a destination must be writable (and may not exist yet); a source must
 # already exist, otherwise the tool errors for reasons unrelated to conformance.
-_WRITE_ROLE_HINTS = ("destination", "dest", "dst", "target", "output", "out", "to")
-_READ_ROLE_HINTS = ("source", "src", "from", "input", "in", "origin")
+# Matched per token, because "to" inside "token" and "out" inside "timeout"
+# are not destination words.
+_WRITE_ROLE_TOKENS = {"destination", "dest", "dst", "target", "output", "out", "to"}
 
 # Many servers document a required identifier format with a quoted example, for
 # example "Exact library ID (e.g. '/mongodb/docs')". Reusing that example is the
@@ -163,11 +164,11 @@ def _looks_like_path(name: str) -> bool:
 
 
 def _role(name: str) -> str:
-    lowered = name.lower()
-    if any(hint in lowered for hint in _WRITE_ROLE_HINTS):
+    tokens = _name_tokens(name)
+    if tokens & _WRITE_ROLE_TOKENS:
         return "write"
-    if any(hint in lowered for hint in _READ_ROLE_HINTS):
-        return "read"
+    # Defaults to read: a missing source file surfaces as a clear tool error,
+    # while a destination the server was told about but never seeded is silent.
     return "read"
 
 
