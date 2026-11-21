@@ -288,7 +288,24 @@ def build_parser(prog: str = "safesink") -> argparse.ArgumentParser:
     check.add_argument(
         "--sandbox-observer",
         action="store_true",
-        help="also hash the sandbox directory when --sqlite-query is used",
+        help="also hash the sandbox directory when a query observer is used",
+    )
+    check.add_argument(
+        "--pgsql-query",
+        action="append",
+        default=[],
+        metavar="ENV_VAR=SQL",
+        help=(
+            "observe a PostgreSQL query; ENV_VAR names the variable holding the "
+            "DSN, which never enters the manifest (repeatable)"
+        ),
+    )
+    check.add_argument(
+        "--mysql-query",
+        action="append",
+        default=[],
+        metavar="ENV_VAR=SQL",
+        help="observe a MySQL query; ENV_VAR names the variable holding the DSN (repeatable)",
     )
     check.add_argument(
         "--allow-unobserved-mutations",
@@ -564,6 +581,9 @@ def main(argv: list[str] | None = None, prog: str = "safesink") -> int:
         header_env = _parse_env(parser, arguments.header_env)
         allowed_hosts = tuple(arguments.allow_host) or None
         sqlite_queries = _parse_sqlite_queries(parser, arguments.sqlite_query)
+        postgres_queries = _parse_sqlite_queries(parser, arguments.pgsql_query)
+        mysql_queries = _parse_sqlite_queries(parser, arguments.mysql_query)
+        database_observers = sqlite_queries or postgres_queries or mysql_queries
         contracts = _parse_contracts(parser, arguments.contract)
         contract_all = (
             _parse_hint_spec(parser, arguments.contract_all)
@@ -597,13 +617,17 @@ def main(argv: list[str] | None = None, prog: str = "safesink") -> int:
             if (
                 destructive
                 and arguments.include_destructive
-                and sqlite_queries
+                and database_observers
                 and not arguments.sandbox_observer
                 and not arguments.allow_unobserved_mutations
             ):
                 databases = ", ".join(
-                    str(Path(database).expanduser().resolve())
-                    for database, _ in sqlite_queries
+                    [
+                        str(Path(database).expanduser().resolve())
+                        for database, _ in sqlite_queries
+                    ]
+                    + [f"${name} (postgres)" for name, _ in postgres_queries]
+                    + [f"${name} (mysql)" for name, _ in mysql_queries]
                 )
                 _die(
                     parser,
@@ -635,6 +659,8 @@ def main(argv: list[str] | None = None, prog: str = "safesink") -> int:
                 url=arguments.url,
                 headers_from_env=header_env,
                 allowed_hosts=allowed_hosts,
+                postgres_queries=postgres_queries,
+                mysql_queries=mysql_queries,
             )
             write_manifest(manifest, manifest_path)
             if arguments.dry_run:

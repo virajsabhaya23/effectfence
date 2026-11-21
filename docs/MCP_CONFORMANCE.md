@@ -248,6 +248,29 @@ SHA-256, and the JUnit report carries `baselineSuppressedCount` plus one
 baseline that was merely inconclusive cannot hide a violation the new run found:
 that violation is new.
 
+## PostgreSQL and MySQL
+
+Production data is not usually a local SQLite file. Point an observer at the
+rows a query returns:
+
+```bash
+safesink mcp-check \
+  --pgsql-query ORDERS_DSN="select id, status from orders order by id" \
+  -- npx -y your-postgres-mcp
+```
+
+The left side is the name of the environment variable holding the DSN, not the
+DSN itself: a connection string carries a password, so it must never appear in a
+manifest or a report. `--mysql-query` works the same way with PyMySQL.
+
+Each snapshot opens a read-only transaction (`BEGIN READ ONLY` for PostgreSQL,
+`SET SESSION TRANSACTION READ ONLY` for MySQL) with a statement timeout, reads the
+rows, and rolls back. The diff is the same row multiset used by SQLite: a removed
+row is destructive, an insert is a change, and anything the query does not select
+is invisible. Both drivers are optional - install `safesink[postgres]` or
+`safesink[mysql]`; a missing driver is reported as such rather than silently
+skipping the boundary.
+
 ## Remote servers over streamable HTTP
 
 Not every server is a local command. Point `mcp-check` at a URL instead of a

@@ -431,7 +431,11 @@ def list_server_tools(
 
 def _database_observer_id(database: Path, used: set[str]) -> str:
     stem = re.sub(r"[^a-z0-9]+", "-", database.stem.lower()).strip("-")
-    base = f"sqlite-{stem or 'db'}"
+    return _unique_observer_id(f"sqlite-{stem or 'db'}", used)
+
+
+def _unique_observer_id(base: str, used: set[str]) -> str:
+    base = re.sub(r"[^a-z0-9]+", "-", base.lower()).strip("-") or "observer"
     candidate = base
     suffix = 2
     while candidate in used:
@@ -462,6 +466,8 @@ def build_manifest(
     url: str | None = None,
     headers_from_env: dict[str, str] | None = None,
     allowed_hosts: tuple[str, ...] | None = None,
+    postgres_queries: list[tuple[str, str]] | None = None,
+    mysql_queries: list[tuple[str, str]] | None = None,
 ) -> dict[str, Any]:
     """Turn advertised tools into a manifest, skipping tools we must not auto-call.
 
@@ -475,7 +481,9 @@ def build_manifest(
     observers: list[dict[str, Any]] = []
     used_observer_ids: set[str] = set()
     database_queries = list(sqlite_queries or [])
-    if include_sandbox_observer or not database_queries:
+    postgres = list(postgres_queries or [])
+    mysql = list(mysql_queries or [])
+    if include_sandbox_observer or not (database_queries or postgres or mysql):
         observers.append(
             {"id": "sandbox", "kind": "filesystem", "root": observer_root, "sensitive": False}
         )
@@ -498,6 +506,20 @@ def build_manifest(
                 "sensitive": False,
             }
         )
+    for kind, queries in (("postgres-query", postgres), ("mysql-query", mysql)):
+        for environment_variable, query in queries:
+            observers.append(
+                {
+                    "id": _unique_observer_id(
+                        f"{kind.split('-')[0]}-{environment_variable}",
+                        used_observer_ids,
+                    ),
+                    "kind": kind,
+                    "dsnFromEnv": environment_variable,
+                    "query": query,
+                    "sensitive": False,
+                }
+            )
     cases: list[dict[str, Any]] = []
     skipped: list[dict[str, str]] = []
     used_ids: set[str] = set()
