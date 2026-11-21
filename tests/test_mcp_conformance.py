@@ -13,6 +13,8 @@ from importlib.resources import files
 from pathlib import Path
 
 from safesink.cli import main as cli_main
+import contextlib
+import io
 from safesink.mcp_client import restricted_environment
 from safesink.mcp_reports import (
     write_junit_report,
@@ -337,6 +339,51 @@ class McpConformanceTests(unittest.TestCase):
             self.assertEqual(exit_code, 2)
             report = json.loads(report_path.read_text(encoding="utf-8"))
             self.assertLess(report["score"]["value"], 95)
+
+    def test_baseline_suppresses_exactly_the_known_findings(self) -> None:
+        path = ROOT / "examples" / "mcp-conformance" / "failing.json"
+        baseline = verify_manifest(path)
+        report = verify_manifest(
+            path, baseline=baseline, baseline_path=path, new_only=True
+        )
+        self.assertEqual(report["baseline"]["suppressedCount"], 3)
+        self.assertEqual(report["baseline"]["regressions"], [])
+        self.assertEqual(len(report["baseline"]["sha256"]), 64)
+        self.assertTrue(all(not case["violations"] for case in report["cases"]))
+        self.assertEqual(report["verdict"], "pass")
+
+    def test_a_new_finding_still_fails_under_new_only(self) -> None:
+        path = ROOT / "examples" / "mcp-conformance" / "failing.json"
+        baseline = json.loads(json.dumps(verify_manifest(path)))
+        for case in baseline["cases"]:
+            if case["violations"]:
+                case["violations"].pop()
+                break
+        report = verify_manifest(path, baseline=baseline, new_only=True)
+        self.assertEqual(report["verdict"], "fail")
+        self.assertEqual(report["baseline"]["suppressedCount"], 2)
+        self.assertEqual(len(report["baseline"]["regressions"]), 1)
+
+    def test_a_finding_absent_from_the_new_run_is_reported_fixed(self) -> None:
+        path = ROOT / "examples" / "mcp-conformance" / "failing.json"
+        baseline = json.loads(json.dumps(verify_manifest(path)))
+        baseline["cases"].append(
+            {"id": "ghost", "tool": "ghost", "violations": [{"code": "GHOST"}]}
+        )
+        report = verify_manifest(path, baseline=baseline, new_only=True)
+        self.assertEqual(report["baseline"]["fixed"], ["ghost:GHOST"])
+        self.assertEqual(report["baseline"]["fixedCount"], 1)
+
+    def test_new_only_without_a_baseline_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = self.manifest(
+                Path(directory),
+                [{"id": "read", "tool": "read_note", "arguments": {}}],
+            )
+            with contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit) as refused:
+                    cli_main(["mcp-verify", str(path), "--new-only"])
+            self.assertEqual(refused.exception.code, 2)
 
     def test_reports_are_valid_xml_and_sarif(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

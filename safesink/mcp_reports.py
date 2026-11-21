@@ -45,6 +45,27 @@ def write_junit_report(report: dict[str, Any], path: str | Path) -> None:
     cert = report.get("certificateSha256") or report.get("certificate_sha256") or ""
     if cert:
         ET.SubElement(props, "property", {"name": "certificateSha256", "value": str(cert)})
+    baseline = report.get("baseline")
+    if isinstance(baseline, dict):
+        # A suppressed finding is still visible in the CI suite, even though it
+        # no longer fails the run.
+        ET.SubElement(
+            props,
+            "property",
+            {
+                "name": "baselineSuppressedCount",
+                "value": str(baseline.get("suppressedCount", 0)),
+            },
+        )
+        for suppressed in baseline.get("suppressed", []):
+            ET.SubElement(
+                props,
+                "property",
+                {
+                    "name": "baselineSuppressed",
+                    "value": f"{suppressed.get('caseId')}:{suppressed.get('code')}",
+                },
+            )
     for case in cases:
         node = ET.SubElement(
             suite,

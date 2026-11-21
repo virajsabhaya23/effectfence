@@ -176,6 +176,19 @@ Ambiguous-result schedules (`ambiguousResultFault`) repeat a call under
 committed-result-lost, no-effect-timeout, duplicate-on-retry, or explicitly
 unclassified.
 
+## Adopting it on an existing server
+
+Record today, gate tomorrow:
+
+```bash
+safesink mcp-verify safesink.mcp.json --out baseline.json
+safesink mcp-verify safesink.mcp.json --baseline baseline.json --new-only
+```
+
+`--new-only` fails only on `(caseId, code)` pairs the baseline did not record.
+Every suppressed finding is still listed with its case and code, and the JUnit
+report counts them, so adoption never hides what was accepted.
+
 ## Trust score
 
 Every report also carries `score: {value, version, formula, inputs}`: 100 minus

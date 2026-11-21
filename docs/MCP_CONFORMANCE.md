@@ -224,6 +224,30 @@ pin a released commit or tag:
 Pin a full commit SHA in high-assurance environments. Preserve the JSON report
 as a CI artifact and use the process exit code as the merge gate.
 
+## Adopting the gate on an existing server
+
+A first scan of a large server finds everything at once, so the only realistic CI
+policy would be to ignore the verdict. Take a baseline instead:
+
+```bash
+safesink mcp-verify safesink.mcp.json --out baseline.json          # record today
+safesink mcp-verify safesink.mcp.json \
+  --baseline baseline.json --new-only --out report.json            # gate tomorrow
+```
+
+With `--new-only`, a violation fails the run only when its `(caseId, code)` pair
+is absent from the baseline. The key is the case and the finding code, not the
+message, so wording changes and a declaration that moves from an annotation to a
+manifest contract do not read as regressions.
+
+Nothing is hidden. `report.baseline` lists every suppression with its case and
+code, the regressions, the findings that disappeared (`fixed`), a
+`BASELINE_REGRESSION` / `BASELINE_FIXED` summary, the baseline path and its
+SHA-256, and the JUnit report carries `baselineSuppressedCount` plus one
+`baselineSuppressed` property per entry. A new finding still fails the run, and a
+baseline that was merely inconclusive cannot hide a violation the new run found:
+that violation is new.
+
 ## Trust score
 
 Every report carries `score: {value, version, formula, inputs}`. The score starts
