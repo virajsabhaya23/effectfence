@@ -1,10 +1,29 @@
 from __future__ import annotations
 
+import json
+import re
 import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).parents[1]
 RELEASE = (ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
+
+
+class RegistryEntryTests(unittest.TestCase):
+    def test_the_registry_entry_matches_the_package_version(self) -> None:
+        """A registry version that is not the released one is unpublishable."""
+        entry = json.loads((ROOT / "server.json").read_text(encoding="utf-8"))
+        pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+        declared = re.search(r'(?m)^version\s*=\s*"([^"]+)"', pyproject)
+        assert declared is not None
+        self.assertEqual(entry["version"], declared.group(1))
+        self.assertEqual(entry["packages"][0]["version"], declared.group(1))
+        self.assertEqual(entry["packages"][0]["identifier"], "safesink")
+        self.assertTrue(entry["name"].startswith("io.github.virajsabhaya23/"))
+
+    def test_the_description_does_not_promise_execution_by_default(self) -> None:
+        entry = json.loads((ROOT / "server.json").read_text(encoding="utf-8"))
+        self.assertIn("--allow-exec", entry["description"])
 
 
 class ReleaseWorkflowTests(unittest.TestCase):
