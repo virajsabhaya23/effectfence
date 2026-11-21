@@ -192,6 +192,34 @@ class SynthesizeArgumentTests(unittest.TestCase):
         self.assertTrue(file_argument["path"].endswith(".txt"))
         self.assertEqual(directory_argument["path"], "/sandbox")
 
+    def test_identifier_names_containing_file_are_not_paths(self) -> None:
+        schema = {
+            "type": "object",
+            "properties": {
+                "profile_id": {"type": "string"},
+                "target_language": {"type": "string"},
+                "source_language": {"type": "string"},
+                "target_audience": {"type": "string"},
+            },
+            "required": ["profile_id", "target_language", "source_language", "target_audience"],
+        }
+        arguments = synthesize_arguments(
+            schema, sandbox="/sandbox", tool_name="translate_document"
+        )
+        for name in ("profile_id", "target_language", "source_language", "target_audience"):
+            self.assertEqual(arguments[name], PROBE_STRING)
+
+    def test_camel_case_path_names_still_resolve_into_the_sandbox(self) -> None:
+        schema = {
+            "type": "object",
+            "properties": {"filePath": {"type": "string"}},
+            "required": ["filePath"],
+        }
+        arguments = synthesize_arguments(
+            schema, sandbox="/sandbox", tool_name="read_note"
+        )
+        self.assertTrue(arguments["filePath"].startswith("/sandbox"))
+
     def test_quoted_identifier_example_is_reused(self) -> None:
         schema = {
             "type": "object",
