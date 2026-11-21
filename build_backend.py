@@ -166,4 +166,12 @@ def build_sdist(sdist_directory: str, config_settings: dict | None = None) -> st
             ):
                 continue
             archive.add(path, arcname=f"{DIST}/{path.relative_to(root)}")
+        # PEP 625/PEP 517: a source distribution must carry its metadata, or
+        # ``python -m build`` cannot turn the sdist back into a wheel.
+        metadata = _metadata().encode()
+        info = tarfile.TarInfo(f"{DIST}/PKG-INFO")
+        info.size = len(metadata)
+        info.mode = 0o644
+        info.mtime = int(os.environ.get("SOURCE_DATE_EPOCH", "315532800"))
+        archive.addfile(info, io.BytesIO(metadata))
     return name

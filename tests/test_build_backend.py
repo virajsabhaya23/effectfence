@@ -69,6 +69,12 @@ class BuildBackendTests(unittest.TestCase):
             self.assertIn("safesink-0.3.0/build_backend.py", names)
             self.assertIn("safesink-0.3.0/pyproject.toml", names)
             self.assertFalse(any(".egg-info/" in name for name in names))
+            # ``python -m build`` refuses an sdist without PKG-INFO, which would
+            # break the PyPI release job before it ever uploads anything.
+            with tarfile.open(source) as archive:
+                metadata = archive.extractfile("safesink-0.3.0/PKG-INFO")
+                self.assertIsNotNone(metadata)
+                self.assertIn(b"Version: 0.3.0", metadata.read())
 
 
 if __name__ == "__main__":
