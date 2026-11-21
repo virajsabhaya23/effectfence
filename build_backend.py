@@ -36,9 +36,9 @@ Classifier: Programming Language :: Python :: 3
 Classifier: Programming Language :: Python :: 3 :: Only
 Classifier: Topic :: Software Development :: Quality Assurance
 Classifier: Topic :: Software Development :: Testing
-Project-URL: Homepage, https://github.com/virajsabhaya23/effectfence
-Project-URL: Repository, https://github.com/virajsabhaya23/effectfence
-Project-URL: Issues, https://github.com/virajsabhaya23/effectfence/issues
+Project-URL: Homepage, https://github.com/virajsabhaya23/safesink
+Project-URL: Repository, https://github.com/virajsabhaya23/safesink
+Project-URL: Issues, https://github.com/virajsabhaya23/safesink/issues
 Provides-Extra: live-kafka-postgres
 Requires-Dist: confluent-kafka>=2.5,<3; extra == "live-kafka-postgres"
 Requires-Dist: psycopg[binary]>=3.2,<4; extra == "live-kafka-postgres"

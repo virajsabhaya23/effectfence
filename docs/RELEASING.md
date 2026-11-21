@@ -56,5 +56,5 @@ These need repository-owner access and cannot be automated from the repository:
 ## After a release
 
 The `container` workflow builds and pushes
-`ghcr.io/virajsabhaya23/effectfence` for the new `v*` tag. The post-publish check
+`ghcr.io/virajsabhaya23/safesink` for the new `v*` tag. The post-publish check
 is the source of truth for "the release works", not the publish step's success.

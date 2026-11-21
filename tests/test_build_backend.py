@@ -34,10 +34,10 @@ class BuildBackendTests(unittest.TestCase):
             with zipfile.ZipFile(wheel) as archive:
                 metadata = archive.read(f"{DIST}.dist-info/METADATA").decode()
         self.assertIn(
-            "Project-URL: Repository, https://github.com/virajsabhaya23/effectfence",
+            "Project-URL: Repository, https://github.com/virajsabhaya23/safesink",
             metadata,
         )
-        self.assertNotIn("virajsabhaya23/safesink", metadata)
+        self.assertNotIn("virajsabhaya23/effectfence", metadata)
 
     def test_wheel_is_reproducible_and_contains_schema_and_license(self) -> None:
         with tempfile.TemporaryDirectory() as first, tempfile.TemporaryDirectory() as second:

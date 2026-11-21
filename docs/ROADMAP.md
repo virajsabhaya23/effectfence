@@ -17,13 +17,13 @@ sprint, Phase 3 made it spread.
 
 | Item | Issue |
 | --- | --- |
-| CLI contracts so unannotated servers can be verified | [#36](https://github.com/virajsabhaya23/effectfence/issues/36) |
-| PostgreSQL and MySQL observers | [#34](https://github.com/virajsabhaya23/effectfence/issues/34) |
-| Streamable HTTP transport | [#33](https://github.com/virajsabhaya23/effectfence/issues/33) |
-| `--dry-run` plan preview | [#35](https://github.com/virajsabhaya23/effectfence/issues/35) |
-| Destructive tools against a real database | [#31](https://github.com/virajsabhaya23/effectfence/issues/31) |
-| Argument synthesis: prompt paths, write roles, directories | [#27](https://github.com/virajsabhaya23/effectfence/issues/27), [#28](https://github.com/virajsabhaya23/effectfence/issues/28), [#29](https://github.com/virajsabhaya23/effectfence/issues/29) |
-| Diffable failures: stderr excerpt, phase and case | [#30](https://github.com/virajsabhaya23/effectfence/issues/30) |
+| CLI contracts so unannotated servers can be verified | [#36](https://github.com/virajsabhaya23/safesink/issues/36) |
+| PostgreSQL and MySQL observers | [#34](https://github.com/virajsabhaya23/safesink/issues/34) |
+| Streamable HTTP transport | [#33](https://github.com/virajsabhaya23/safesink/issues/33) |
+| `--dry-run` plan preview | [#35](https://github.com/virajsabhaya23/safesink/issues/35) |
+| Destructive tools against a real database | [#31](https://github.com/virajsabhaya23/safesink/issues/31) |
+| Argument synthesis: prompt paths, write roles, directories | [#27](https://github.com/virajsabhaya23/safesink/issues/27), [#28](https://github.com/virajsabhaya23/safesink/issues/28), [#29](https://github.com/virajsabhaya23/safesink/issues/29) |
+| Diffable failures: stderr excerpt, phase and case | [#30](https://github.com/virajsabhaya23/safesink/issues/30) |
 
 Why first: every later claim rests on the check being true for a server someone
 actually runs, not only for the fixtures.
@@ -32,12 +32,12 @@ actually runs, not only for the fixtures.
 
 | Item | Issue |
 | --- | --- |
-| Baseline and `--new-only` | [#37](https://github.com/virajsabhaya23/effectfence/issues/37) |
-| Reasoned suppressions with expiry | [#38](https://github.com/virajsabhaya23/effectfence/issues/38) |
-| Run budget and per-case restart | [#32](https://github.com/virajsabhaya23/effectfence/issues/32), [#40](https://github.com/virajsabhaya23/effectfence/issues/40) |
-| Trust score and `--min-score` | [#44](https://github.com/virajsabhaya23/effectfence/issues/44) |
-| Markdown report, job summary, PR comment, one-step action | [#42](https://github.com/virajsabhaya23/effectfence/issues/42), [#48](https://github.com/virajsabhaya23/effectfence/issues/48) |
-| Container image and untrusted-server guidance | [#41](https://github.com/virajsabhaya23/effectfence/issues/41) |
+| Baseline and `--new-only` | [#37](https://github.com/virajsabhaya23/safesink/issues/37) |
+| Reasoned suppressions with expiry | [#38](https://github.com/virajsabhaya23/safesink/issues/38) |
+| Run budget and per-case restart | [#32](https://github.com/virajsabhaya23/safesink/issues/32), [#40](https://github.com/virajsabhaya23/safesink/issues/40) |
+| Trust score and `--min-score` | [#44](https://github.com/virajsabhaya23/safesink/issues/44) |
+| Markdown report, job summary, PR comment, one-step action | [#42](https://github.com/virajsabhaya23/safesink/issues/42), [#48](https://github.com/virajsabhaya23/safesink/issues/48) |
+| Container image and untrusted-server guidance | [#41](https://github.com/virajsabhaya23/safesink/issues/41) |
 
 Why second: adoption fails on noise and safety, not on missing findings.
 
@@ -45,13 +45,13 @@ Why second: adoption fails on noise and safety, not on missing findings.
 
 | Item | Issue |
 | --- | --- |
-| `safesink lint`: zero-execution first run | [#43](https://github.com/virajsabhaya23/effectfence/issues/43) |
-| `safesink init`: reviewable scaffold | [#39](https://github.com/virajsabhaya23/effectfence/issues/39) |
-| Badge and reproducible pinned leaderboard | [#45](https://github.com/virajsabhaya23/effectfence/issues/45) |
-| Signed certificates anyone can verify | [#46](https://github.com/virajsabhaya23/effectfence/issues/46) |
-| Lint inside an agent, execution opt-in | [#47](https://github.com/virajsabhaya23/effectfence/issues/47) |
-| Release automation with a post-publish check | [#50](https://github.com/virajsabhaya23/effectfence/issues/50) |
-| Naming, badges and public direction | [#49](https://github.com/virajsabhaya23/effectfence/issues/49), [#51](https://github.com/virajsabhaya23/effectfence/issues/51), [#52](https://github.com/virajsabhaya23/effectfence/issues/52) |
+| `safesink lint`: zero-execution first run | [#43](https://github.com/virajsabhaya23/safesink/issues/43) |
+| `safesink init`: reviewable scaffold | [#39](https://github.com/virajsabhaya23/safesink/issues/39) |
+| Badge and reproducible pinned leaderboard | [#45](https://github.com/virajsabhaya23/safesink/issues/45) |
+| Signed certificates anyone can verify | [#46](https://github.com/virajsabhaya23/safesink/issues/46) |
+| Lint inside an agent, execution opt-in | [#47](https://github.com/virajsabhaya23/safesink/issues/47) |
+| Release automation with a post-publish check | [#50](https://github.com/virajsabhaya23/safesink/issues/50) |
+| Naming, badges and public direction | [#49](https://github.com/virajsabhaya23/safesink/issues/49), [#51](https://github.com/virajsabhaya23/safesink/issues/51), [#52](https://github.com/virajsabhaya23/safesink/issues/52) |
 
 Why third: none of it matters until the check is true and the gate is cheap.
 

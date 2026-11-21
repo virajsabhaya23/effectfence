@@ -1,7 +1,7 @@
 # Running SafeSink in a container
 
 ```bash
-docker run --rm -v "$PWD:/work" ghcr.io/virajsabhaya23/effectfence \
+docker run --rm -v "$PWD:/work" ghcr.io/virajsabhaya23/safesink \
   mcp-verify manifest.json --out /out/report.json
 ```
 
@@ -10,7 +10,7 @@ user `safesink` (uid 10001), and carries Node 22 because most MCP servers are
 started with `npx`. `safesink` is the entrypoint, so arguments go straight to the
 CLI.
 
-Images are published to `ghcr.io/virajsabhaya23/effectfence` for `main` and every
+Images are published to `ghcr.io/virajsabhaya23/safesink` for `main` and every
 `v*` tag by `.github/workflows/container.yml` (linux/amd64, GitHub Actions cache,
 `GITHUB_TOKEN` only). Nothing needs to be built by hand, and no registry secret
 exists to rotate.
@@ -28,7 +28,7 @@ docker run --rm \
   --tmpfs /tmp:rw,size=64m \
   -v "$PWD/manifest.json:/work/manifest.json:ro" \
   -v "$PWD/out:/out:rw" \
-  ghcr.io/virajsabhaya23/effectfence \
+  ghcr.io/virajsabhaya23/safesink \
   mcp-verify /work/manifest.json --out /out/report.json
 ```
 
@@ -53,7 +53,7 @@ inconclusive case instead of a clean pass.
 `npx` needs its package cache. Pre-populate it in a derived image:
 
 ```dockerfile
-FROM ghcr.io/virajsabhaya23/effectfence
+FROM ghcr.io/virajsabhaya23/safesink
 USER root
 RUN npm install -g @modelcontextprotocol/server-filesystem@2.4.0
 USER safesink

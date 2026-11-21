@@ -19,7 +19,7 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
-      - uses: virajsabhaya23/effectfence@main
+      - uses: virajsabhaya23/safesink@main
         with:
           manifest: examples/mcp-conformance/passing.json
       - uses: actions/upload-artifact@v7
@@ -81,4 +81,4 @@ in the calling workflow - the snippet above does, and the repository's own
 The action is marketplace-ready (`name`, `description`, `branding`, documented
 inputs and outputs). Listing it is a one-time UI step in the repository's release
 page and cannot be automated from the repository; until it is listed, use the
-`uses: virajsabhaya23/effectfence@main` form above.
+`uses: virajsabhaya23/safesink@main` form above.
