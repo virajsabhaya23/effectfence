@@ -69,6 +69,14 @@ class DeprecatedAliasTests(unittest.TestCase):
                 self.assertEqual(raised.exception.code, 0)
                 self.assertEqual(out.getvalue().strip(), f"{prog} {safesink.__version__}")
 
+    def test_installed_console_scripts_use_their_own_entry_point(self) -> None:
+        # A shared ``safesink.cli:main`` entry point would make the installed
+        # ``effectfence`` command report "safesink" and skip the deprecation
+        # warning, so each script must resolve through its own module.
+        pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+        self.assertIn('safesink = "safesink.cli:main"', pyproject)
+        self.assertIn('effectfence = "effectfence.cli:main"', pyproject)
+
     def test_deprecated_cli_warns_and_matches_the_primary_verdict(self) -> None:
         fixture = str(ROOT / "examples" / "safe_fenced_recovery.json")
         with contextlib.redirect_stdout(io.StringIO()):

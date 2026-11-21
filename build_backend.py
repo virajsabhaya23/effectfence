@@ -108,7 +108,7 @@ def build_wheel(
             f"{dist_info}/LICENSE": (root / "LICENSE").read_bytes(),
             f"{dist_info}/entry_points.txt": (
                 b"[console_scripts]\nsafesink = safesink.cli:main\n"
-                b"effectfence = safesink.cli:main\n"
+                b"effectfence = effectfence.cli:main\n"
             ),
         }
         for archive_name, data in generated.items():
@@ -133,7 +133,7 @@ def prepare_metadata_for_build_wheel(
     (directory / "WHEEL").write_text(_wheel_metadata(), encoding="utf-8")
     (directory / "entry_points.txt").write_text(
         "[console_scripts]\nsafesink = safesink.cli:main\n"
-        "effectfence = safesink.cli:main\n",
+        "effectfence = effectfence.cli:main\n",
         encoding="utf-8",
     )
     return directory.name

@@ -20,6 +20,13 @@ All notable changes will be documented here. This project follows Semantic Versi
 - CI and the local gates (format hygiene, lint, type-interface, compile, benchmark)
   now cover the primary `safesink` package as well as the alias; the type-interface
   gate discovers modules automatically instead of using a hand-maintained list.
+- Fixed the installed `effectfence` console script: it was mapped to
+  `safesink.cli:main`, so it advertised itself as `safesink` and skipped the
+  deprecation warning. It now routes through `effectfence.cli:main`, and the
+  packaging tests assert both entry points and that the backend version matches
+  `safesink.__version__`.
+- The unit suite now imports `safesink` directly; only the compatibility test
+  exercises the deprecated `effectfence` alias.
 
 - Added an observer non-interference control schedule. Every MCP case (and every
   ambiguous-result trial) now runs matched no-tool observation rounds using the
