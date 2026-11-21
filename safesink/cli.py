@@ -19,6 +19,7 @@ from .certificates import (
 from .mcp_client import McpClientError
 from .mcp_lint import lint_manifest, lint_tools
 from .mcp_reports import (
+    render_badge_svg,
     render_markdown_report,
     write_json_report,
     write_junit_report,
@@ -423,6 +424,13 @@ def build_parser(prog: str = "safesink") -> argparse.ArgumentParser:
     init.add_argument("--protocol-version", default="2025-11-25")
     init.add_argument("--startup-timeout", type=float, default=60.0)
 
+    badge = commands.add_parser(
+        "badge", help="render a Shields-style SVG badge from a report"
+    )
+    badge.add_argument("--report", required=True, help="JSON report to summarise")
+    badge.add_argument("--out", default="safesink-badge.svg", help="SVG path")
+    badge.add_argument("--label", default="safesink")
+
     sign = commands.add_parser(
         "sign", help="issue a detached certificate for a report (optionally Ed25519-signed)"
     )
@@ -819,6 +827,34 @@ def main(argv: list[str] | None = None, prog: str = "safesink") -> int:
                         "review the cases, fill every empty contract, then run "
                         f"safesink mcp-verify {destination}"
                     ),
+                },
+                indent=2,
+            )
+        )
+        return 0
+
+    if arguments.cmd == "badge":
+        try:
+            report = json.loads(Path(arguments.report).read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            _die(parser, f"report not found: {arguments.report}")
+            return 2
+        except (OSError, json.JSONDecodeError) as error:
+            _die(parser, f"could not read report: {error}")
+            return 2
+        verdict = str(report.get("verdict", "unknown"))
+        score = (report.get("score") or {}).get("value")
+        svg = render_badge_svg(verdict, score, label=arguments.label)
+        destination = Path(arguments.out)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(svg, encoding="utf-8")
+        print(
+            json.dumps(
+                {
+                    "badge": str(destination),
+                    "verdict": verdict,
+                    "score": score,
+                    "markdown": f"![SafeSink]({destination})",
                 },
                 indent=2,
             )

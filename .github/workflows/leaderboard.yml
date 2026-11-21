@@ -1,0 +1,41 @@
+name: leaderboard
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: leaderboard
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    name: pinned scans
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install SafeSink
+        run: python -m pip install .
+      - name: Scan the pinned server list
+        run: python scripts/scan_servers.py --timeout 300
+      - name: Upload leaderboard data
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: leaderboard
+          path: |
+            data/leaderboard.json
+            data/leaderboard.html
+          if-no-files-found: warn
+          retention-days: 14

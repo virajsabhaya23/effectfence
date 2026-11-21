@@ -1,0 +1,29 @@
+{
+  "comment": "Pinned, reproducible scans. Bump a version in its own commit so a leaderboard row is always reproducible from this file.",
+  "servers": [
+    {
+      "name": "filesystem",
+      "package": "@modelcontextprotocol/server-filesystem",
+      "version": "2.4.0",
+      "command": ["npx", "-y", "@modelcontextprotocol/server-filesystem@2.4.0", "./sandbox"]
+    },
+    {
+      "name": "memory",
+      "package": "@modelcontextprotocol/server-memory",
+      "version": "2.2.1",
+      "command": ["npx", "-y", "@modelcontextprotocol/server-memory@2.2.1"]
+    },
+    {
+      "name": "sequential-thinking",
+      "package": "@modelcontextprotocol/server-sequential-thinking",
+      "version": "2.2.0",
+      "command": ["npx", "-y", "@modelcontextprotocol/server-sequential-thinking@2.2.0"]
+    },
+    {
+      "name": "context7",
+      "package": "@upstash/context7-mcp",
+      "version": "4.7.3",
+      "command": ["npx", "-y", "@upstash/context7-mcp@4.7.3"]
+    }
+  ]
+}
