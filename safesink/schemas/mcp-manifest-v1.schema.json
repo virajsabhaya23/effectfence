@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/virajsabhaya23/effectfence/schemas/mcp-manifest-v1.schema.json",
+  "$id": "https://github.com/virajsabhaya23/safesink/schemas/mcp-manifest-v1.schema.json",
   "title": "EffectFence MCP conformance manifest v1",
   "type": "object",
   "additionalProperties": false,

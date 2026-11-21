@@ -213,7 +213,7 @@ This repository includes a composite GitHub Action. A consuming repository can
 pin a released commit or tag:
 
 ```yaml
-- uses: virajsabhaya23/effectfence@main
+- uses: virajsabhaya23/safesink@main
   with:
     manifest: safesink.mcp.json
     out: out/safesink/report.json

@@ -34,11 +34,11 @@ live-kafka-postgres = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/virajsabhaya23/effectfence"
-Repository = "https://github.com/virajsabhaya23/effectfence"
-Issues = "https://github.com/virajsabhaya23/effectfence/issues"
-Documentation = "https://github.com/virajsabhaya23/effectfence/tree/main/docs"
-Changelog = "https://github.com/virajsabhaya23/effectfence/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/virajsabhaya23/safesink"
+Repository = "https://github.com/virajsabhaya23/safesink"
+Issues = "https://github.com/virajsabhaya23/safesink/issues"
+Documentation = "https://github.com/virajsabhaya23/safesink/tree/main/docs"
+Changelog = "https://github.com/virajsabhaya23/safesink/blob/main/CHANGELOG.md"
 
 [project.scripts]
 safesink = "safesink.cli:main"

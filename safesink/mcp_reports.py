@@ -176,7 +176,7 @@ def write_sarif_report(report: dict[str, Any], path: str | Path) -> None:
             "id": rule_id,
             "name": rule_id,
             "shortDescription": {"text": _rule_title(rule_id)},
-            "helpUri": "https://github.com/virajsabhaya23/effectfence/blob/main/docs/MCP_CONFORMANCE.md",
+            "helpUri": "https://github.com/virajsabhaya23/safesink/blob/main/docs/MCP_CONFORMANCE.md",
         }
         for rule_id in sorted(rule_ids)
     ]
@@ -188,7 +188,7 @@ def write_sarif_report(report: dict[str, Any], path: str | Path) -> None:
                 "tool": {
                     "driver": {
                         "name": "SafeSink MCP Conformance",
-                        "informationUri": "https://github.com/virajsabhaya23/effectfence",
+                        "informationUri": "https://github.com/virajsabhaya23/safesink",
                         "version": str(
                             report.get("runtime", {}).get("version") or "unknown"
                         ),

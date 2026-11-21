@@ -1,6 +1,12 @@
 # SafeSink
 
-**SafeSink checks whether an MCP server's tools do what their annotations claim.**
+[![PyPI](https://img.shields.io/pypi/v/safesink)](https://pypi.org/project/safesink/)
+[![Python](https://img.shields.io/pypi/pyversions/safesink)](https://pypi.org/project/safesink/)
+[![CI](https://github.com/virajsabhaya23/safesink/actions/workflows/test.yml/badge.svg)](https://github.com/virajsabhaya23/safesink/actions/workflows/test.yml)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+
+**SafeSink checks whether an MCP server's tools do what their annotations
+claim, by calling them and observing what actually changed.**
 
 MCP tool annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`,
 `openWorldHint`) are untrusted hints: nothing stops a server from declaring a
@@ -38,7 +44,7 @@ python -m pip install safesink
 Python 3.10+; no runtime dependencies. To work on it, from a clone:
 
 ```bash
-git clone https://github.com/virajsabhaya23/effectfence.git
+git clone https://github.com/virajsabhaya23/safesink.git
 cd effectfence
 python -m pip install -e .
 ```
@@ -303,7 +309,7 @@ plus the observed boundary; `--github-summary` appends it to
 
 ```yaml
 - uses: actions/checkout@v7
-- uses: virajsabhaya23/effectfence@main
+- uses: virajsabhaya23/safesink@main
   with:
     manifest: examples/mcp-conformance/passing.json
     out: out/mcp/report.json
@@ -364,7 +370,7 @@ forward to `safesink`.
 ## GitHub Actions
 
 ```yaml
-- uses: virajsabhaya23/effectfence@main
+- uses: virajsabhaya23/safesink@main
   with:
     manifest: safesink.mcp.json
 ```
@@ -386,7 +392,7 @@ publishes with trusted publishing, then installs the result back from PyPI.
 ## Container
 
 ```bash
-docker run --rm -v "$PWD:/work" ghcr.io/virajsabhaya23/effectfence \
+docker run --rm -v "$PWD:/work" ghcr.io/virajsabhaya23/safesink \
   mcp-verify manifest.json --out /out/report.json
 ```
 
