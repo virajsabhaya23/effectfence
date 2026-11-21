@@ -3,7 +3,7 @@
   "name": "io.github.virajsabhaya23/safesink",
   "title": "SafeSink",
   "description": "Lint and verify MCP server tool annotations inside an agent. Lint-only by default; verification that starts the server under test requires --allow-exec.",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "repository": {
     "url": "https://github.com/virajsabhaya23/safesink",
     "source": "github"
@@ -12,7 +12,7 @@
     {
       "registryType": "pypi",
       "identifier": "safesink",
-      "version": "0.5.0",
+      "version": "0.6.0",
       "runtimeHint": "uvx",
       "transport": {
         "type": "stdio"

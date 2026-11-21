@@ -2,7 +2,7 @@
 
 All notable changes will be documented here. This project follows Semantic Versioning and the Keep a Changelog structure.
 
-## Unreleased
+## 0.6.0 - 2026-11-21
 
 ### Added
 
