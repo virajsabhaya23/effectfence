@@ -374,6 +374,15 @@ SARIF evidence, adds a job summary and keeps one sticky PR comment up to date.
 [`docs/GITHUB_ACTION.md`](docs/GITHUB_ACTION.md) has the full input list,
 artifact upload and the fork-permission caveat.
 
+## Release
+
+One command keeps versions, changelog and PyPI in sync: `Publish to PyPI` runs from a
+published release or by hand, refuses a version that disagrees with
+`pyproject.toml`, `safesink/__init__.py` or `build_backend.py`, runs every gate,
+publishes with trusted publishing, then installs the result back from PyPI.
+[`docs/RELEASING.md`](docs/RELEASING.md) lists the two one-time owner steps
+(PyPI trusted publisher and the `pypi` environment).
+
 ## Container
 
 ```bash
