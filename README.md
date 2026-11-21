@@ -46,6 +46,19 @@ safesink mcp-check \
   -- npx -y @modelcontextprotocol/server-filesystem "$PWD/sandbox"
 ```
 
+Review what a run would do before any side effect exists:
+
+```bash
+safesink mcp-check --dry-run --out out/plan.json -- \
+  npx -y @modelcontextprotocol/server-filesystem "$PWD/sandbox"
+```
+
+`--dry-run` still starts the server and reads `tools/list`, because that is the
+only read-only way to learn the schemas, then stops. It prints a table of tool,
+synthesized arguments, observers and declarations, calls no tool, and writes the
+manifest (with the plan under `generated.plan`) to `--out`. It does not require
+an `--sqlite-query` database to exist, since nothing will be read.
+
 `mcp-check` starts the server, reads `tools/list`, synthesizes minimal arguments
 from each tool's `inputSchema` (reusing any quoted example the description gives,
 such as `'/mongodb/docs'`), seeds the sandbox with probe fixtures those arguments

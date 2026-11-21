@@ -124,6 +124,11 @@ def build_parser(prog: str = "safesink") -> argparse.ArgumentParser:
         help="include a bounded, redacted server stderr excerpt in the report",
     )
     check.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="read tools/list and print the plan without calling any tool",
+    )
+    check.add_argument(
         "--timeout",
         type=float,
         help="stop issuing calls after this many seconds and report the rest as unverified",
@@ -174,6 +179,11 @@ def build_parser(prog: str = "safesink") -> argparse.ArgumentParser:
         help="also generate cases for tools declaring destructiveHint (sandbox only)",
     )
     scan.add_argument("--setup-command", nargs="+")
+    scan.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="print the generated plan without calling any tool",
+    )
     scan.add_argument("--min-coverage", type=float, default=0.0)
     scan.add_argument("--inherit-env", nargs="+", default=["HOME"])
     scan.add_argument(
@@ -196,6 +206,27 @@ def build_parser(prog: str = "safesink") -> argparse.ArgumentParser:
 def _exit_code(report: dict) -> int:
     """0 = verified, 3 = nothing failed but nothing could be verified, 2 = finding."""
     return {"pass": 0, "inconclusive": 3}.get(str(report.get("verdict")), 2)
+
+
+def _print_plan(plan: list[dict]) -> None:
+    """Readable review of a dry run: tool, arguments, observers, declarations."""
+    print("\nPLAN (no tool is called)", file=sys.stderr)
+    header = f"{'TOOL':<28} {'KIND':<12} {'OBSERVERS':<22} DECLARED / ARGUMENTS"
+    print(header, file=sys.stderr)
+    print("-" * len(header), file=sys.stderr)
+    for item in plan:
+        declared = ", ".join(
+            f"{key}={value}" for key, value in sorted(item.get("contract", {}).items())
+        ) or "nothing declared"
+        observers = ",".join(item.get("observers", [])) or "none"
+        print(
+            f"{item['tool']:<28} {item['kind']:<12} {observers:<22} {declared}",
+            file=sys.stderr,
+        )
+        print(
+            f"  arguments: {json.dumps(item.get('arguments', {}), sort_keys=True)}",
+            file=sys.stderr,
+        )
 
 
 def _print_case_verdicts(report: dict) -> None:
@@ -278,8 +309,31 @@ def main(argv: list[str] | None = None, prog: str = "safesink") -> int:
                 sqlite_queries=sqlite_queries,
                 include_sandbox_observer=arguments.sandbox_observer,
                 capture_stderr=arguments.capture_stderr,
+                dry_run=arguments.dry_run,
             )
             write_manifest(manifest, manifest_path)
+            if arguments.dry_run:
+                # There is no report to write, so --out holds the reviewable
+                # manifest (with the plan) a user can then verify later.
+                written = write_manifest(manifest, arguments.out)
+                plan = manifest["generated"]["plan"]
+                print(
+                    json.dumps(
+                        {
+                            "mode": "dry-run",
+                            "server": server_info.get("name"),
+                            "version": server_info.get("version"),
+                            "toolsAdvertised": len(tools),
+                            "casesGenerated": len(manifest["cases"]),
+                            "observers": [item["id"] for item in manifest["observers"]],
+                            "plan": plan,
+                            "manifest": str(written),
+                        },
+                        indent=2,
+                    )
+                )
+                _print_plan(plan)
+                return 0
             report = verify_manifest(
                 manifest_path,
                 capture_stderr=arguments.capture_stderr,
@@ -376,24 +430,26 @@ def main(argv: list[str] | None = None, prog: str = "safesink") -> int:
             inherit_env=arguments.inherit_env,
             env=server_env,
             protocol_version=arguments.protocol_version,
+            dry_run=arguments.dry_run,
         )
     except (ScanError, McpClientError) as error:
         _die(parser, str(error), hint="the server must speak MCP over stdio")
         return 2
     destination = write_manifest(manifest, arguments.out)
-    print(
-        json.dumps(
-            {
-                "server": server_info.get("name"),
-                "version": server_info.get("version"),
-                "toolsAdvertised": len(tools),
-                "casesGenerated": len(manifest["cases"]),
-                "skipped": manifest["generated"]["skipped"],
-                "manifest": str(destination),
-            },
-            indent=2,
-        )
-    )
+    summary: dict[str, object] = {
+        "server": server_info.get("name"),
+        "version": server_info.get("version"),
+        "toolsAdvertised": len(tools),
+        "casesGenerated": len(manifest["cases"]),
+        "skipped": manifest["generated"]["skipped"],
+        "manifest": str(destination),
+    }
+    if arguments.dry_run:
+        summary["mode"] = "dry-run"
+        summary["plan"] = manifest["generated"]["plan"]
+    print(json.dumps(summary, indent=2))
+    if arguments.dry_run:
+        _print_plan(manifest["generated"]["plan"])
     return 0
 
 

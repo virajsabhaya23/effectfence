@@ -438,6 +438,7 @@ def build_manifest(
     sqlite_queries: list[tuple[str, str]] | None = None,
     include_sandbox_observer: bool = False,
     capture_stderr: bool = False,
+    dry_run: bool = False,
 ) -> dict[str, Any]:
     """Turn advertised tools into a manifest, skipping tools we must not auto-call.
 
@@ -458,7 +459,9 @@ def build_manifest(
         used_observer_ids.add("sandbox")
     for database, query in database_queries:
         resolved = Path(database).expanduser().resolve()
-        if not resolved.is_file():
+        # A dry run observes nothing, so a missing database is not an error yet;
+        # it becomes one the moment the run would actually read rows.
+        if not dry_run and not resolved.is_file():
             raise ScanError(
                 f"SQLite database to observe does not exist: {resolved}; create and seed it "
                 "before scanning"
@@ -534,19 +537,45 @@ def build_manifest(
     if capture_stderr:
         server["captureStderr"] = True
 
+    generated: dict[str, Any] = {
+        "by": "safesink mcp-scan",
+        "skipped": skipped,
+        "toolsAdvertised": len(tools),
+        "probeFixtures": fixtures,
+    }
+    if dry_run:
+        generated["plan"] = plan_manifest(tools, cases, observers)
     return {
         "schemaVersion": "effectfence.mcp.v1",
         "server": server,
         "observers": observers,
         "cases": cases,
         "policy": {"minimumToolCoverage": minimum_tool_coverage},
-        "generated": {
-            "by": "safesink mcp-scan",
-            "skipped": skipped,
-            "toolsAdvertised": len(tools),
-            "probeFixtures": fixtures,
-        },
+        "generated": generated,
     }
+
+
+def plan_manifest(
+    tools: list[dict[str, Any]],
+    cases: list[dict[str, Any]],
+    observers: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """What a run would do, so a cautious user can review it before any call."""
+
+    kinds = {tool.get("name"): classify(tool) for tool in tools}
+    observer_ids = [observer["id"] for observer in observers]
+    return [
+        {
+            "tool": case["tool"],
+            "case": case["id"],
+            "kind": kinds.get(case["tool"], "unknown"),
+            "arguments": case.get("arguments", {}),
+            "observers": case.get("observerIds", observer_ids),
+            "contract": case.get("contract", {}),
+            "retry": bool(case.get("retry", False)),
+        }
+        for case in cases
+    ]
 
 
 def write_manifest(manifest: dict[str, Any], destination: str | Path) -> Path:

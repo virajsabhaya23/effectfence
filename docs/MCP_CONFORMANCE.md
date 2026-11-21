@@ -224,6 +224,16 @@ pin a released commit or tag:
 Pin a full commit SHA in high-assurance environments. Preserve the JSON report
 as a CI artifact and use the process exit code as the merge gate.
 
+## Reviewing the plan first
+
+`--dry-run` on `mcp-check` or `mcp-scan` keeps the read-only half of a scan (start
+the server, call `tools/list`, synthesize arguments) and drops the rest. No
+`tools/call` is made and no setup or cleanup hook runs, so no observer can see a
+change. The plan - tool, kind, synthesized arguments, observers and declarations -
+is printed and stored under `generated.plan` in the manifest written to `--out`,
+which is a normal manifest you can feed to `mcp-verify` afterwards. A dry run also
+skips the `--sqlite-query` existence check, because it never reads rows.
+
 ## Bounding a run
 
 Per-call timeouts do not bound a whole scan: a 60-tool server that hangs on
