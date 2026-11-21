@@ -421,3 +421,16 @@ The SVG shows the verdict and score for one pinned server version. It is not a
 certification; `safesink sign` issues the certificate. See
 [`docs/LEADERBOARD.md`](docs/LEADERBOARD.md) for the badge and the nightly scan
 of the pinned servers in `servers.json`.
+
+## Name
+
+SafeSink is the PyPI package and this repository (it previously shipped as
+`effectfence`; that name is kept only as an import package and CLI alias).
+
+It is **not** the same project as
+[EffectFence on crates.io](https://crates.io/crates/effectfence) /
+[npm](https://www.npmjs.com/package/effectfence) by AurumFlux. That project is a
+runtime fence for crash-and-retry side effects. SafeSink is a deterministic
+conformance checker: it compares a tool's declared effects with the state an
+observer saw change. If you arrived here looking for the runtime fence, see
+[github.com/aurumflux20/effectfence](https://github.com/aurumflux20/effectfence).
