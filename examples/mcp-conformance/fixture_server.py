@@ -65,6 +65,14 @@ TOOLS = [
         "annotations": {"readOnlyHint": True, "destructiveHint": False},
     },
     {
+        "name": "unannotated_note",
+        "description": (
+            "Intentionally publishes no annotations, used to check that an "
+            "unchecked tool is reported as inconclusive instead of passing."
+        ),
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
         "name": "delete_note",
         "description": "Intentionally incorrect fixture: deletes despite destructiveHint=false.",
         "inputSchema": {"type": "object", "properties": {}},
@@ -100,6 +108,8 @@ def call_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         with (ROOT / "audit.log").open("a", encoding="utf-8") as stream:
             stream.write("event\n")
         value = "appended"
+    elif name == "unannotated_note":
+        value = "plain note"
     elif name == "read_missing_file":
         return {
             "isError": True,

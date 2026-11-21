@@ -24,6 +24,16 @@ def _die(parser: argparse.ArgumentParser, message: str, *, hint: str | None = No
     parser.exit(2)
 
 
+def _parse_env(parser: argparse.ArgumentParser, pairs: list[str]) -> dict[str, str]:
+    environment: dict[str, str] = {}
+    for pair in pairs:
+        key, separator, value = pair.partition("=")
+        if not separator or not key:
+            _die(parser, f"--env expects KEY=VALUE, got {pair!r}")
+        environment[key] = value
+    return environment
+
+
 def _add_scan_options(parser: argparse.ArgumentParser, *, required_out: bool) -> None:
     parser.add_argument(
         "--observer-root", required=True, help="sandbox directory to observe"
@@ -59,6 +69,13 @@ def build_parser(prog: str = "safesink") -> argparse.ArgumentParser:
     )
     check.add_argument("--min-coverage", type=float, default=0.0)
     check.add_argument("--inherit-env", nargs="+", default=["HOME"])
+    check.add_argument(
+        "--env",
+        action="append",
+        default=[],
+        metavar="KEY=VALUE",
+        help="environment variable for the server (repeatable)",
+    )
     check.add_argument("--protocol-version", default="2025-11-25")
     check.add_argument("--startup-timeout", type=float, default=60.0)
     check.add_argument(
@@ -97,6 +114,13 @@ def build_parser(prog: str = "safesink") -> argparse.ArgumentParser:
     scan.add_argument("--setup-command", nargs="+")
     scan.add_argument("--min-coverage", type=float, default=0.0)
     scan.add_argument("--inherit-env", nargs="+", default=["HOME"])
+    scan.add_argument(
+        "--env",
+        action="append",
+        default=[],
+        metavar="KEY=VALUE",
+        help="environment variable for the server (repeatable)",
+    )
     scan.add_argument("--protocol-version", default="2025-11-25")
     scan.add_argument("--startup-timeout", type=float, default=60.0)
     scan.add_argument(
@@ -140,11 +164,13 @@ def main(argv: list[str] | None = None, prog: str = "safesink") -> int:
         )
         sandbox.mkdir(parents=True, exist_ok=True)
         manifest_path = Path(arguments.manifest_out or (sandbox / "manifest.json"))
+        server_env = _parse_env(parser, arguments.env)
         try:
             tools, server_info = list_server_tools(
                 arguments.command,
                 cwd=Path.cwd(),
                 inherit_env=arguments.inherit_env,
+                env=server_env,
                 protocol_version=arguments.protocol_version,
                 startup_timeout_seconds=arguments.startup_timeout,
             )
@@ -156,6 +182,7 @@ def main(argv: list[str] | None = None, prog: str = "safesink") -> int:
                 include_destructive=arguments.include_destructive,
                 minimum_tool_coverage=arguments.min_coverage,
                 inherit_env=arguments.inherit_env,
+                env=server_env,
                 protocol_version=arguments.protocol_version,
             )
             write_manifest(manifest, manifest_path)
@@ -219,11 +246,13 @@ def main(argv: list[str] | None = None, prog: str = "safesink") -> int:
     # mcp-scan
     observer_root = Path(arguments.observer_root)
     observer_root.mkdir(parents=True, exist_ok=True)
+    server_env = _parse_env(parser, arguments.env)
     try:
         tools, server_info = list_server_tools(
             arguments.command,
             cwd=Path(arguments.cwd).resolve(),
             inherit_env=arguments.inherit_env,
+            env=server_env,
             protocol_version=arguments.protocol_version,
             startup_timeout_seconds=arguments.startup_timeout,
         )
@@ -236,6 +265,7 @@ def main(argv: list[str] | None = None, prog: str = "safesink") -> int:
             setup_command=arguments.setup_command,
             minimum_tool_coverage=arguments.min_coverage,
             inherit_env=arguments.inherit_env,
+            env=server_env,
             protocol_version=arguments.protocol_version,
         )
     except (ScanError, McpClientError) as error:

@@ -53,7 +53,7 @@ class McpConformanceTests(unittest.TestCase):
                 }
             ],
             "cases": normalized,
-            "policy": {"minimumToolCoverage": min(1.0, len(cases) / 6)},
+            "policy": {"minimumToolCoverage": min(1.0, len(cases) / 7)},
         }
         path = root / "manifest.json"
         path.write_text(json.dumps(manifest), encoding="utf-8")
@@ -147,6 +147,40 @@ class McpConformanceTests(unittest.TestCase):
             ["TOOL_ERROR_EXPECTATION_MISMATCH"],
         )
         self.assertEqual(report["verdict"], "fail")
+
+    def test_unannotated_tools_are_inconclusive_and_not_called(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            report = verify_manifest(
+                self.manifest(
+                    Path(directory), [{"id": "plain", "tool": "unannotated_note"}]
+                )
+            )
+            case = report["cases"][0]
+        self.assertEqual(case["calls"], [])
+        self.assertEqual(
+            [item["code"] for item in case["inconclusive"]],
+            ["NO_DECLARED_ANNOTATIONS"],
+        )
+        self.assertFalse(case["passed"])
+        self.assertEqual(report["verdict"], "inconclusive")
+
+    def test_contract_still_verifies_an_unannotated_tool(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            report = verify_manifest(
+                self.manifest(
+                    Path(directory),
+                    [
+                        {
+                            "id": "plain",
+                            "tool": "unannotated_note",
+                            "contract": {"readOnlyHint": True},
+                        }
+                    ],
+                )
+            )
+            case = report["cases"][0]
+        self.assertEqual(case["inconclusive"], [])
+        self.assertTrue(case["passed"])
 
     def test_shipped_examples_behave_as_documented(self) -> None:
         examples = ROOT / "examples" / "mcp-conformance"
@@ -414,7 +448,7 @@ class McpConformanceTests(unittest.TestCase):
             value["server"]["env"]["EFFECTFENCE_FIXTURE_PAGINATE"] = "1"
             path.write_text(json.dumps(value))
             report = verify_manifest(path)
-            self.assertEqual(report["coverage"]["listedTools"], 6)
+            self.assertEqual(report["coverage"]["listedTools"], 7)
             self.assertEqual(report["verdict"], "pass")
 
     def test_manifest_rejects_unknown_observer(self) -> None:

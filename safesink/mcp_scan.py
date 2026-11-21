@@ -12,6 +12,7 @@ finding, so argument bugs cannot masquerade as violations.
 from __future__ import annotations
 
 import json
+import re
 import struct
 import zlib
 from pathlib import Path
@@ -58,6 +59,11 @@ _MEDIA_HINTS = ("media", "image", "photo", "picture", "png", "jpeg", "jpg")
 # already exist, otherwise the tool errors for reasons unrelated to conformance.
 _WRITE_ROLE_HINTS = ("destination", "dest", "dst", "target", "output", "out", "to")
 _READ_ROLE_HINTS = ("source", "src", "from", "input", "in", "origin")
+
+# Many servers document a required identifier format with a quoted example, for
+# example "Exact library ID (e.g. '/mongodb/docs')". Reusing that example is the
+# difference between a rejected call and a real observation.
+_EXAMPLE_PATTERN = re.compile(r"['\"](/[^'\"\s,]+)['\"]")
 
 
 class ScanError(ValueError):
@@ -139,6 +145,14 @@ def _wants_media(name: str, description: str, tool_name: str) -> bool:
     return any(hint in haystack for hint in _MEDIA_HINTS)
 
 
+def _description_example(description: str) -> str | None:
+    match = _EXAMPLE_PATTERN.search(description)
+    if match is None:
+        return None
+    example = match.group(1)
+    return example if len(example) > 2 else None
+
+
 def _path_value(
     name: str,
     schema: dict[str, Any],
@@ -198,6 +212,10 @@ def _scalar_for(
 
     if sandbox and _looks_like_path(name):
         return _path_value(name, schema, sandbox, tool_name, role)
+    description = schema.get("description") if isinstance(schema.get("description"), str) else ""
+    example = _description_example(description)
+    if example is not None:
+        return example
     return PROBE_STRING
 
 

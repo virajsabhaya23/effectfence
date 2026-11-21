@@ -47,10 +47,11 @@ safesink mcp-check \
 ```
 
 `mcp-check` starts the server, reads `tools/list`, synthesizes minimal arguments
-from each tool's `inputSchema`, seeds the sandbox with probe fixtures those
-arguments can refer to, skips tools declaring `destructiveHint: true`, and
-verifies what changed. The command goes after `--` so its own flags are not
-parsed by `safesink`.
+from each tool's `inputSchema` (reusing any quoted example the description gives,
+such as `'/mongodb/docs'`), seeds the sandbox with probe fixtures those arguments
+can refer to, skips tools declaring `destructiveHint: true`, and verifies what
+changed. Servers that need configuration take `--env KEY=VALUE`, repeatable. The
+command goes after `--` so its own flags are not parsed by `safesink`.
 
 For a server that needs a curated argument per tool, write a manifest and use
 `mcp-verify` instead:
@@ -101,6 +102,11 @@ unverified case as verified.
 | `TOOL_NOT_LISTED` | a case targets a tool that `tools/list` never advertised |
 | `TOOL_COVERAGE_BELOW_MINIMUM` | too few advertised tools are covered by cases |
 
+A tool that publishes **no annotations at all** has nothing to contradict, so it
+is reported as `NO_DECLARED_ANNOTATIONS` and is never called: a pass there would
+claim the tool was verified when no check existed. Add a `contract` to a case if
+you want to verify an unannotated server against your own policy.
+
 Two behaviours keep false findings out of reports:
 
 - **Observer control rounds.** Every case (and every ambiguous-result trial) runs
@@ -131,6 +137,20 @@ default settings (destructive tools skipped):
 The single inconclusive case is `copy_file`, whose second identical call is
 rejected because the first call created the destination; the tool's
 `idempotentHint: true` therefore remains unverified rather than violated.
+
+Servers outside the official set, same date, same defaults:
+
+| Server | Version | Tools | Cases | Findings | Inconclusive | Verdict |
+| --- | --- | --- | --- | --- | --- | --- |
+| `@upstash/context7-mcp` | 4.7.3 | 2 | 2 | 0 | 0 | pass (exit 0) |
+| `duckduckgo-mcp-server` (PyPI) | 0.7.0 | 3 | 3 | 0 | 3 | inconclusive (exit 3) |
+| `mcp-server-sqlite-npx` | 0.8.0 | 5 | 5 | 0 | 5 | inconclusive (exit 3) |
+
+Context7 publishes full annotations on both tools; its `readOnlyHint`,
+`idempotentHint` and `openWorldHint` claims held. The other two publish no
+annotations on any tool, so every case is `NO_DECLARED_ANNOTATIONS` and no tool is
+called: there is nothing to compare against. That is the intended outcome, and it
+is why an unannotated tool is not reported as a pass.
 
 These are trusted servers, so zero findings is the expected result: the table
 shows that the scanner does not manufacture findings, not that it can catch a

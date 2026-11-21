@@ -2,6 +2,23 @@
 
 All notable changes will be documented here. This project follows Semantic Versioning and the Keep a Changelog structure.
 
+## 0.4.3 - 2026-11-21
+
+- A tool that publishes no effect annotations and has no case `contract` is now
+  reported as `NO_DECLARED_ANNOTATIONS` and is **not called**. Previously such a
+  case was reported as `passed` with zero declarations checked: running against
+  `duckduckgo-mcp-server` 0.7.0 produced a green report over three completely
+  unchecked tools.
+- Synthesized string arguments now reuse a quoted example from the property
+  description (for example `'/mongodb/docs'` for a `libraryId`). On
+  `@upstash/context7-mcp` 4.7.3 this turned a rejected `query-docs` call into a
+  verified pass.
+- Added `--env KEY=VALUE` (repeatable) to `mcp-scan` and `mcp-check`, so servers
+  that require configuration can be checked in one step instead of only through a
+  hand-written manifest.
+- Documented validation against three servers outside the official set
+  (Context7 4.7.3, duckduckgo-mcp-server 0.7.0, mcp-server-sqlite-npx 0.8.0).
+
 ## 0.4.2 - 2026-11-21
 
 - Documentation-only release so the PyPI project page is correct: the README now

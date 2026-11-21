@@ -214,6 +214,21 @@ def _run_case(
         key: {"value": value, "source": sources[key]}
         for key, value in declarations.items()
     }
+    if not declarations:
+        # Nothing was declared, so nothing can be contradicted. Calling the tool
+        # would only risk side effects in exchange for no evidence, and a pass
+        # here would report an unchecked tool as verified.
+        public["inconclusive"].append(
+            {
+                "code": "NO_DECLARED_ANNOTATIONS",
+                "message": (
+                    "the tool publishes no effect annotations and the case declares no "
+                    "contract, so there is nothing to verify; the tool was not called"
+                ),
+            }
+        )
+        public["passed"] = False
+        return _finish_case(public, started)
     selected_ids = case.get("observerIds", list(observers))
     selected = [observers[observer_id] for observer_id in selected_ids]
     control_rounds = int(case.get("observerControlRounds", 1))

@@ -126,6 +126,25 @@ class SynthesizeArgumentTests(unittest.TestCase):
         self.assertTrue(file_argument["path"].endswith(".txt"))
         self.assertEqual(directory_argument["path"], "/sandbox")
 
+    def test_quoted_identifier_example_is_reused(self) -> None:
+        schema = {
+            "type": "object",
+            "properties": {
+                "libraryId": {
+                    "type": "string",
+                    "description": (
+                        "Exact library ID (e.g. '/mongodb/docs', '/vercel/next.js') "
+                        "retrieved from resolve-library-id."
+                    ),
+                }
+            },
+            "required": ["libraryId"],
+        }
+        arguments = synthesize_arguments(
+            schema, sandbox="/sandbox", tool_name="query-docs"
+        )
+        self.assertEqual(arguments["libraryId"], "/mongodb/docs")
+
     def test_missing_schema_yields_no_arguments(self) -> None:
         self.assertEqual(synthesize_arguments(None), {})
 

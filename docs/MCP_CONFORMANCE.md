@@ -20,10 +20,11 @@ safesink mcp-check --sandbox sandbox --out out/mcp/report.json \
 ```
 
 `mcp-check` starts the server, reads `tools/list`, synthesizes arguments from
-each `inputSchema`, seeds the sandbox with probe fixtures, skips tools that
-declare `destructiveHint: true`, verifies, and writes the report. Pass
-`--manifest-out` to keep the generated manifest and `--include-destructive` to
-call destructive tools against a disposable sandbox.
+each `inputSchema` (including any quoted example the description provides), seeds
+the sandbox with probe fixtures, skips tools that declare `destructiveHint: true`,
+verifies, and writes the report. Pass `--manifest-out` to keep the generated
+manifest, `--include-destructive` to call destructive tools against a disposable
+sandbox, and `--env KEY=VALUE` (repeatable) for servers that need configuration.
 
 With a hand-written manifest:
 
@@ -113,6 +114,14 @@ A report has one of three verdicts, and the CLI maps them to exit codes:
 boundary cannot classify, and rejected synthesized arguments. JUnit records these
 cases as `skipped`. A case passes only with no violations and no unresolved
 evidence, so a CI gate never treats unverified behavior as verified.
+
+### Tools without annotations
+
+A tool that publishes none of the four hints and has no `contract` in its case is
+reported as `NO_DECLARED_ANNOTATIONS` and is **not called**. Nothing can be
+contradicted, so a call would only risk side effects, and a pass would claim a
+check that never happened. Supply a `contract` to verify such a server against
+an internal policy instead.
 
 ### Generated arguments
 
