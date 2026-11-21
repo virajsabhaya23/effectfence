@@ -361,6 +361,19 @@ measure corpus authoring, not detection of real systems).
 The deprecated `effectfence` import path and console script still work and
 forward to `safesink`.
 
+## GitHub Actions
+
+```yaml
+- uses: virajsabhaya23/effectfence@main
+  with:
+    manifest: safesink.mcp.json
+```
+
+One step installs SafeSink, checks or verifies the server, writes JSON, JUnit and
+SARIF evidence, adds a job summary and keeps one sticky PR comment up to date.
+[`docs/GITHUB_ACTION.md`](docs/GITHUB_ACTION.md) has the full input list,
+artifact upload and the fork-permission caveat.
+
 ## Container
 
 ```bash
