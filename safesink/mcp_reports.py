@@ -29,7 +29,7 @@ def write_junit_report(report: dict[str, Any], path: str | Path) -> None:
     suite = ET.Element(
         "testsuite",
         {
-            "name": "effectfence-mcp-conformance",
+            "name": "safesink-mcp-conformance",
             "tests": str(total_tests),
             "failures": str(failures),
             "errors": "0",
@@ -46,7 +46,7 @@ def write_junit_report(report: dict[str, Any], path: str | Path) -> None:
             suite,
             "testcase",
             {
-                "classname": "effectfence.mcp",
+                "classname": "safesink.mcp",
                 "name": str(case.get("id", "unknown")),
                 "time": f"{float(case.get('durationMs', 0)) / 1000:.3f}",
             },
@@ -68,7 +68,7 @@ def write_junit_report(report: dict[str, Any], path: str | Path) -> None:
         node = ET.SubElement(
             suite,
             "testcase",
-            {"classname": "effectfence.mcp", "name": "manifest-policy", "time": "0"},
+            {"classname": "safesink.mcp", "name": "manifest-policy", "time": "0"},
         )
         failure = ET.SubElement(
             node,
@@ -150,9 +150,11 @@ def write_sarif_report(report: dict[str, Any], path: str | Path) -> None:
             {
                 "tool": {
                     "driver": {
-                        "name": "EffectFence MCP Conformance",
+                        "name": "SafeSink MCP Conformance",
                         "informationUri": "https://github.com/virajsabhaya23/effectfence",
-                        "version": str(report.get("effectfenceVersion", "0.2.0")),
+                        "version": str(
+                            report.get("runtime", {}).get("version") or "unknown"
+                        ),
                         "rules": rules,
                     }
                 },
@@ -167,7 +169,7 @@ def write_sarif_report(report: dict[str, Any], path: str | Path) -> None:
 
 def _failure_summary(violations: list[dict[str, Any]]) -> str:
     if not violations:
-        return "EffectFence conformance failure"
+        return "SafeSink conformance failure"
     return ", ".join(str(item.get("code", "failure")) for item in violations)[:500]
 
 

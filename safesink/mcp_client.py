@@ -11,6 +11,13 @@ from pathlib import Path
 from typing import Any
 
 
+def _client_version() -> str:
+    # Imported lazily: this module is imported while ``safesink/__init__`` runs.
+    from . import __version__
+
+    return __version__
+
+
 class McpClientError(RuntimeError):
     """Raised when an MCP server cannot complete the requested protocol operation."""
 
@@ -98,7 +105,7 @@ class McpStdioClient:
                 {
                     "protocolVersion": self.protocol_version,
                     "capabilities": {},
-                    "clientInfo": {"name": "effectfence", "version": "0.2.0"},
+                    "clientInfo": {"name": "safesink", "version": _client_version()},
                 },
                 timeout_seconds=self.startup_timeout_seconds,
             )

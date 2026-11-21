@@ -45,6 +45,10 @@ def load_manifest(path: str | Path) -> tuple[dict[str, Any], Path]:
 
 
 def verify_manifest(path: str | Path) -> dict[str, Any]:
+    # Imported lazily: this module is imported while ``safesink/__init__`` runs,
+    # so the package version does not exist yet at module-import time.
+    from . import __version__ as package_version
+
     manifest, manifest_path = load_manifest(path)
     base = manifest_path.parent
     server = manifest["server"]
@@ -144,7 +148,7 @@ def verify_manifest(path: str | Path) -> dict[str, Any]:
             "sha256": hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
         },
         "runtime": {
-            "effectfenceVersion": "0.2.0",
+            "version": package_version,
             "pythonVersion": platform.python_version(),
             "platform": platform.system(),
         },
