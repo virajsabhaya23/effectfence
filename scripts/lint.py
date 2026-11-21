@@ -1,7 +1,7 @@
 from pathlib import Path
-import ast,sys
+import ast, sys
 bad=[]
-for base in ('effectfence','tests'):
+for base in ('safesink','effectfence','tests','scripts'):
  for p in Path(base).rglob('*.py'):
   text=p.read_text()
   try: ast.parse(text)

@@ -40,4 +40,4 @@ Changelog = "https://github.com/virajsabhaya23/safesink/blob/main/CHANGELOG.md"
 
 [project.scripts]
 safesink = "safesink.cli:main"
-effectfence = "safesink.cli:main"
+effectfence = "effectfence.cli:main"

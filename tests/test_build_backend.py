@@ -8,9 +8,23 @@ import zipfile
 from pathlib import Path
 
 import build_backend
+import safesink
 
 
 class BuildBackendTests(unittest.TestCase):
+    def test_backend_version_matches_the_package(self) -> None:
+        self.assertEqual(build_backend.VERSION, safesink.__version__)
+
+    def test_console_scripts_point_at_their_own_module(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            wheel = Path(directory) / build_backend.build_wheel(directory)
+            with zipfile.ZipFile(wheel) as archive:
+                entry_points = archive.read(
+                    "safesink-0.3.0.dist-info/entry_points.txt"
+                ).decode()
+        self.assertIn("safesink = safesink.cli:main", entry_points)
+        self.assertIn("effectfence = effectfence.cli:main", entry_points)
+
     def test_wheel_is_reproducible_and_contains_schema_and_license(self) -> None:
         with tempfile.TemporaryDirectory() as first, tempfile.TemporaryDirectory() as second:
             first_wheel = Path(first) / build_backend.build_wheel(first)

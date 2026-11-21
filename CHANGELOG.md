@@ -9,6 +9,37 @@ All notable changes will be documented here. This project follows Semantic Versi
 
 ## Unreleased
 
+- Added `--version` to the CLI (works as `safesink --version`, `python -m safesink
+  --version`, and through the deprecated `effectfence` alias, which reports the
+  program name it was invoked as).
+- `effectfence` is now a thin deprecation shim that re-exports `safesink` instead of
+  a second copy of the implementation, so fixes can no longer diverge between the
+  two import paths. A compatibility test asserts every shimmed module re-exports
+  the same public objects, that versions agree, and that both CLI entry points
+  return identical verdict exit codes.
+- CI and the local gates (format hygiene, lint, type-interface, compile, benchmark)
+  now cover the primary `safesink` package as well as the alias; the type-interface
+  gate discovers modules automatically instead of using a hand-maintained list.
+- Fixed the installed `effectfence` console script: it was mapped to
+  `safesink.cli:main`, so it advertised itself as `safesink` and skipped the
+  deprecation warning. It now routes through `effectfence.cli:main`, and the
+  packaging tests assert both entry points and that the backend version matches
+  `safesink.__version__`.
+- The unit suite now imports `safesink` directly; only the compatibility test
+  exercises the deprecated `effectfence` alias.
+- CI is verified to stay within a free GitHub account: public-repo standard
+  `ubuntu-latest` runners only, read-only workflow permissions, per-job timeouts,
+  a single benchmark artifact, 7-14 day artifact retention (the Free plan shares
+  500 MB of artifact storage), and manual `workflow_dispatch` entry points. A new
+  `tests/test_ci_free_tier.py` fails on macOS/Windows/larger runners, merge-queue
+  triggers, CodeQL/Pages uploads, missing timeouts, missing permissions, or
+  unbounded artifact retention. PyPI release metadata now names `safesink`.
+- CI runs the gates and suite on Python 3.10, 3.12, and 3.13, and a separate job
+  builds the wheel, installs it into a fresh virtual environment, and runs
+  `safesink --version` plus the safe and unsafe fixtures through the installed
+  console script. A test also asserts `pyproject.toml`'s version matches
+  `safesink.__version__`.
+
 - Added an observer non-interference control schedule. Every MCP case (and every
   ambiguous-result trial) now runs matched no-tool observation rounds using the
   exact same observer sequence before the tool is invoked. A state transition that

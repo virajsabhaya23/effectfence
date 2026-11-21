@@ -1,17 +1,17 @@
 import json, sqlite3, tempfile, unittest
 from dataclasses import replace
 from pathlib import Path
-from effectfence.io import load
-from effectfence.simulator import verify_scenario
-from effectfence.explore import explore, minimize_failure
-from effectfence.benchmark import run
-from effectfence.ledger import EffectLedger
-from effectfence.sinks import DbApiSink
-from effectfence.httpdemo import start, Handler
-from effectfence.sinks import HttpSink
+from safesink.io import load
+from safesink.simulator import verify_scenario
+from safesink.explore import explore, minimize_failure
+from safesink.benchmark import run
+from safesink.ledger import EffectLedger
+from safesink.sinks import DbApiSink
+from safesink.httpdemo import start, Handler
+from safesink.sinks import HttpSink
 ROOT=Path(__file__).parents[1]
 class T(unittest.TestCase):
- def test_effectfence_crash_safe(self): self.assertTrue(verify_scenario(load(str(ROOT/'examples/safe_fenced_recovery.json')))['safe'])
+ def test_safesink_crash_safe(self): self.assertTrue(verify_scenario(load(str(ROOT/'examples/safe_fenced_recovery.json')))['safe'])
  def test_naive_crash_unsafe(self):
   s=load(str(ROOT/'examples/crash_after_effect.json')); self.assertFalse(verify_scenario(s)['safe'])
  def test_idempotency_crash_window_unsafe(self):
@@ -54,5 +54,5 @@ class T(unittest.TestCase):
   finally: srv.shutdown(); srv.server_close()
  def test_benchmark_count(self): self.assertEqual(run(str(ROOT/'benchmark/corpus.json'))['cases'],30)
  def test_benchmark_safe_fp(self): self.assertEqual(run(str(ROOT/'benchmark/corpus.json'))['schedule_verifier']['fp'],0)
- def test_benchmark_effectfence(self): self.assertEqual(run(str(ROOT/'benchmark/corpus.json'))['schedule_verifier']['fn'],0)
+ def test_benchmark_safesink(self): self.assertEqual(run(str(ROOT/'benchmark/corpus.json'))['schedule_verifier']['fn'],0)
 if __name__=='__main__': unittest.main()

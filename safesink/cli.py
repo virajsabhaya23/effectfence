@@ -7,6 +7,7 @@ import sys
 from dataclasses import asdict
 from pathlib import Path
 
+from . import __version__
 from .benchmark import run as benchmark
 from .citation import citation
 from .explore import explore, minimize_failure
@@ -29,10 +30,11 @@ def _die(parser: argparse.ArgumentParser, message: str, *, hint: str | None = No
     parser.exit(2)
 
 
-def build_parser() -> argparse.ArgumentParser:
+def build_parser(prog: str = "safesink") -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="safesink", description="Crash/retry and MCP side-effect verifier (formerly EffectFence)"
+        prog=prog, description="Crash/retry and MCP side-effect verifier (formerly EffectFence)"
     )
+    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     commands = parser.add_subparsers(dest="cmd", required=True)
 
     verify = commands.add_parser("verify", help="verify a deterministic scenario")
@@ -110,8 +112,8 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = build_parser()
+def main(argv: list[str] | None = None, prog: str = "safesink") -> int:
+    parser = build_parser(prog)
     arguments = parser.parse_args(argv)
     if arguments.cmd == "verify":
         try:

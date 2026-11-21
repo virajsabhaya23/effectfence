@@ -12,14 +12,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib.resources import files
 from pathlib import Path
 
-from effectfence.citation import citation
-from effectfence.mcp_client import restricted_environment
-from effectfence.mcp_reports import (
+from safesink.citation import citation
+from safesink.mcp_client import restricted_environment
+from safesink.mcp_reports import (
     write_junit_report,
     write_sarif_report,
 )
-from effectfence.mcp_verifier import ManifestError, load_manifest, verify_manifest
-from effectfence.observers import (
+from safesink.mcp_verifier import ManifestError, load_manifest, verify_manifest
+from safesink.observers import (
     FilesystemObserver,
     HttpJsonObserver,
     ObserverError,
@@ -445,7 +445,7 @@ class McpConformanceTests(unittest.TestCase):
 
     def test_manifest_schema_is_packaged(self) -> None:
         schema = json.loads(
-            files("effectfence.schemas")
+            files("safesink.schemas")
             .joinpath("mcp-manifest-v1.schema.json")
             .read_text(encoding="utf-8")
         )

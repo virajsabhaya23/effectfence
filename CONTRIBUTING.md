@@ -12,4 +12,11 @@ Thank you for helping improve this project.
    confirm that the passing fixture exits 0 while the dishonest fixture exits 2.
 4. Submit a pull request explaining the behavior change and any compatibility implications.
 
+CI must stay usable with a free GitHub account. Every workflow runs on
+`ubuntu-latest` standard runners, declares read-only `permissions`, sets
+per-job timeouts, and bounds artifact retention; standard runners are unmetered
+for public repositories, while macOS/Windows runners, larger runners, and
+GitHub Advanced Security features are billed or paid-only. `tests/test_ci_free_tier.py`
+enforces these limits, so add new jobs within them.
+
 Never submit credentials, customer data, or undisclosed third-party vulnerabilities. Security-sensitive findings should follow `SECURITY.md`. By contributing, you agree that your contribution is licensed under Apache-2.0.

@@ -5,14 +5,14 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from effectfence.mcp_scan import (
+from safesink.mcp_scan import (
     ScanError,
     build_manifest,
     classify,
     synthesize_arguments,
     write_manifest,
 )
-from effectfence.mcp_verifier import load_manifest
+from safesink.mcp_verifier import load_manifest
 
 READ_TOOL = {
     "name": "read_file",

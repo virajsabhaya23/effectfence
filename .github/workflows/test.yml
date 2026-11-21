@@ -3,6 +3,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -13,13 +14,18 @@ concurrency:
 
 jobs:
   test:
+    name: test (py${{ matrix.python-version }})
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
           cache: pip
       - name: Install
         run: python -m pip install .
@@ -30,16 +36,58 @@ jobs:
       - name: Type interface check
         run: python scripts/typecheck.py
       - name: Compile
-        run: python -m compileall -q effectfence tests
+        run: python -m compileall -q safesink effectfence tests
+      - name: CLI smoke (both entry points)
+        run: |
+          safesink --version
+          effectfence --version
+          safesink verify examples/safe_fenced_recovery.json
+          effectfence verify examples/safe_fenced_recovery.json
       - name: Unit tests
         run: python -m unittest discover -s tests -v
       - name: Benchmark corpus (30 cases)
-        run: python -m effectfence benchmark benchmark/corpus.json --out benchmark/results.json
+        run: python -m safesink benchmark benchmark/corpus.json --out benchmark/results.json
       - name: Keep benchmark results
-        if: always()
+        if: always() && matrix.python-version == '3.12'
         uses: actions/upload-artifact@v7
         with:
-          name: benchmark-results
+          name: benchmark-results-py${{ matrix.python-version }}
           path: benchmark/results.json
           if-no-files-found: warn
           retention-days: 14
+
+  installed-wheel:
+    name: installed wheel (console scripts)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Build the wheel with the offline backend
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip wheel --no-deps --no-build-isolation --wheel-dir dist .
+          ls -l dist
+      - name: Install the wheel into a fresh virtual environment
+        run: |
+          python -m venv "$RUNNER_TEMP/wheel-venv"
+          "$RUNNER_TEMP/wheel-venv/bin/python" -m pip install --no-index dist/*.whl
+          # Import from a neutral directory so this proves the wheel, not the checkout.
+          cd "$RUNNER_TEMP"
+          "$RUNNER_TEMP/wheel-venv/bin/python" -c \
+            "import safesink; assert 'site-packages' in safesink.__file__, safesink.__file__; print(safesink.__file__)"
+      - name: Exercise the installed console scripts
+        run: |
+          venv="$RUNNER_TEMP/wheel-venv/bin"
+          installed_version="$(cd "$RUNNER_TEMP" && "$venv/python" -c 'import safesink; print(safesink.__version__)')"
+          reported="$("$venv/safesink" --version)"
+          expected="safesink $installed_version"
+          echo "reported: $reported"
+          test "$reported" = "$expected"
+          "$venv/safesink" verify examples/safe_fenced_recovery.json
+          status=0
+          "$venv/safesink" verify examples/crash_after_effect.json || status=$?
+          echo "unsafe fixture exit status: $status"
+          test "$status" -eq 2
