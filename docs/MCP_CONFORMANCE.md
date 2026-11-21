@@ -248,6 +248,31 @@ SHA-256, and the JUnit report carries `baselineSuppressedCount` plus one
 baseline that was merely inconclusive cannot hide a violation the new run found:
 that violation is new.
 
+## Remote servers over streamable HTTP
+
+Not every server is a local command. Point `mcp-check` at a URL instead of a
+stdio command:
+
+```bash
+safesink mcp-check \
+  --url https://mcp.example.com/mcp \
+  --allow-host mcp.example.com \
+  --header-env Authorization=MCP_TOKEN \
+  --sandbox ./sandbox --out out/report.json
+```
+
+In a manifest, set `server.transport: "streamable-http"`, `server.url`,
+`server.headersFromEnv` and `server.allowedHosts`. The transport performs the
+required `Accept: application/json, text/event-stream` handshake, keeps the
+`Mcp-Session-Id` the server issues, parses either a JSON body or SSE frames, and
+reports a 401 as a missing token rather than as a protocol failure.
+
+Secrets never enter a manifest or a report: `headersFromEnv` maps a header name to
+an environment variable and the value stays in the environment. The host must be
+in `allowedHosts` (loopback by default), redirects are refused, and response size
+is bounded. The verifier uses the same client surface either way, so cases,
+observers, scores and reports are identical.
+
 ## Showing the result in a pull request
 
 SARIF only surfaces with code scanning enabled, JUnit only in the checks tab,

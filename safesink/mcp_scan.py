@@ -399,7 +399,22 @@ def list_server_tools(
     protocol_version: str = "2025-11-25",
     startup_timeout_seconds: float = 60.0,
     request_timeout_seconds: float = 60.0,
+    url: str | None = None,
+    headers_from_env: dict[str, str] | None = None,
+    allowed_hosts: tuple[str, ...] | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    if url:
+        from .http_transport import McpHttpClient
+
+        with McpHttpClient(
+            url,
+            headers_from_env=headers_from_env,
+            allowed_hosts=allowed_hosts or ("127.0.0.1", "localhost", "::1"),
+            protocol_version=protocol_version,
+            timeout_seconds=request_timeout_seconds,
+            startup_timeout_seconds=startup_timeout_seconds,
+        ) as client:
+            return client.list_tools(), dict(client.server_info)
     environment = restricted_environment(
         list(inherit_env or ["HOME"]), dict(env or {})
     )
@@ -444,6 +459,9 @@ def build_manifest(
     dry_run: bool = False,
     contracts: dict[str, dict[str, bool]] | None = None,
     contract_all: dict[str, bool] | None = None,
+    url: str | None = None,
+    headers_from_env: dict[str, str] | None = None,
+    allowed_hosts: tuple[str, ...] | None = None,
 ) -> dict[str, Any]:
     """Turn advertised tools into a manifest, skipping tools we must not auto-call.
 
@@ -536,12 +554,24 @@ def build_manifest(
             "every tool is declared destructive (use include_destructive to test them)"
         )
 
-    server: dict[str, Any] = {
-        "transport": "stdio",
-        "command": list(command),
-        "cwd": cwd,
-        "protocolVersion": protocol_version,
-    }
+    server: dict[str, Any]
+    if url:
+        server = {
+            "transport": "streamable-http",
+            "url": url,
+            "protocolVersion": protocol_version,
+        }
+        if headers_from_env:
+            server["headersFromEnv"] = dict(headers_from_env)
+        if allowed_hosts:
+            server["allowedHosts"] = list(allowed_hosts)
+    else:
+        server = {
+            "transport": "stdio",
+            "command": list(command),
+            "cwd": cwd,
+            "protocolVersion": protocol_version,
+        }
     if inherit_env:
         server["inheritEnv"] = list(inherit_env)
     if env:

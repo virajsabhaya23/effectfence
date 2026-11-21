@@ -17,12 +17,12 @@
     "server": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "command"
-      ],
       "properties": {
         "transport": {
-          "const": "stdio"
+          "enum": [
+            "stdio",
+            "streamable-http"
+          ]
         },
         "command": {
           "$ref": "#/$defs/command"
@@ -69,8 +69,30 @@
             "manifest"
           ],
           "description": "Case execution order: as written, alphabetical, or manifest.caseOrder."
+        },
+        "url": {
+          "type": "string",
+          "description": "Streamable-HTTP MCP endpoint."
+        },
+        "headersFromEnv": {
+          "$ref": "#/$defs/stringMap"
+        },
+        "allowedHosts": {
+          "$ref": "#/$defs/stringArray"
         }
-      }
+      },
+      "anyOf": [
+        {
+          "required": [
+            "command"
+          ]
+        },
+        {
+          "required": [
+            "url"
+          ]
+        }
+      ]
     },
     "observers": {
       "type": "array",
