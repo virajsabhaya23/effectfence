@@ -6,6 +6,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: write
 
 concurrency:
   group: mcp-conformance-${{ github.ref }}
@@ -27,6 +28,7 @@ jobs:
           out: out/mcp/report.json
           junit: out/mcp/junit.xml
           sarif: out/mcp/report.sarif
+          markdown: out/mcp/report.md
       - name: Preserve conformance evidence
         if: always()
         uses: actions/upload-artifact@v7

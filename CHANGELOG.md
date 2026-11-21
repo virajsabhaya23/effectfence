@@ -2,6 +2,100 @@
 
 All notable changes will be documented here. This project follows Semantic Versioning and the Keep a Changelog structure.
 
+## 0.5.0 - 2026-11-21
+
+This release turns a checker that works on fixtures into a gate a team can adopt on
+a server it already runs, and gives an agent a safe way to use it.
+
+### Added
+
+- `safesink init` scaffolds a reviewable manifest from a live server: one case per
+  tool, `generatedArguments` removed so a rejection is a finding rather than a
+  harness limitation, and an empty `contract` placeholder plus a `generated.todo`
+  entry for every unannotated tool. The scaffold is validated before it is written.
+- `safesink lint` (`--manifest`, `--json`, `--min-annotation-score`) reads
+  `tools/list` and stops: no `tools/call`, no observer, no sandbox. Seven rules,
+  each with its rationale and false-positive caveat in `docs/LINT_RULES.md`.
+- `safesink-mcp` exposes `lint_manifest` and `describe_rules` over MCP. The
+  `verify_manifest` tool, which starts the server under test, is neither advertised
+  nor callable without `--allow-exec`; paths are confined to `--root`.
+- `safesink badge --report` renders a Shields-style SVG with the verdict and score,
+  and `servers.json` + `scripts/scan_servers.py` produce a reproducible leaderboard
+  of pinned versions (`docs/LEADERBOARD.md`). A scan that cannot start is recorded
+  as `inconclusive`, never dropped.
+- `safesink sign` / `safesink verify-cert`: detached certificates with a pure-Python
+  Ed25519 signature (`docs/CERTIFICATES.md`). No runtime dependency, no opaque digest.
+- `postgres-query` and `mysql-query` observers, with `--pgsql-query ENV_VAR=SQL` and
+  `--mysql-query ENV_VAR=SQL`. The DSN comes from an environment variable only; each
+  snapshot runs in a read-only transaction with a statement timeout. Drivers stay
+  optional (`safesink[postgres]`, `safesink[mysql]`).
+- Streamable HTTP transport: `mcp-check --url`, `--allow-host`, `--header-env`, and a
+  manifest `transport: streamable-http` with `url`, `headersFromEnv`, `allowedHosts`.
+- `--contract TOOL=hint:value,...` and `--contract-all`, so an unannotated server can
+  be verified without relaxing the rule that SafeSink does not call tools it was not
+  told how to interpret.
+- `--baseline` and `--new-only`, with `report.baseline`
+  (`BASELINE_REGRESSION`/`BASELINE_FIXED`) and a JUnit `baselineSuppressedCount`.
+- `--suppress FILE` and `--fail-on-suppressed`: suppressions need a reason and an ISO
+  expiry, expired ones are reported, and unmatched entries surface as stale.
+- A documented trust score (`report.score`, weights in `SCORE_*`) and `--min-score`.
+- Markdown reports (`--markdown`, `--github-summary`) and a sticky PR comment.
+- `--timeout` with `RUN_BUDGET_EXHAUSTED`, `--restart-per-case`, `--case-order`.
+- `fatalError {message, phase, case}` plus `--capture-stderr` and a redacted
+  `server.stderrExcerpt`, so a dead run explains itself.
+- `--dry-run` for `mcp-check` and `mcp-scan`: prints the plan, writes
+  `generated.plan`, calls nothing and skips the SQLite existence check.
+- `--allow-unobserved-mutations` guard: `--include-destructive` with a query observer
+  must be acknowledged, because a destructive tool there runs against a real database.
+- Issue and pull-request templates (`bug_report`, `false_positive`,
+  `feature_request`) and `docs/ROADMAP.md` with phases tied to their issues.
+- A one-step composite action: picks `check` or `verify` from the manifest, writes
+  JSON/JUnit/SARIF/Markdown, a job summary and one sticky comment, and exports
+  `verdict`, `score` and `findings`.
+- A multi-stage, unprivileged container image published to GHCR for `main` and `v*`
+  tags, with isolation guidance for untrusted servers (`docs/CONTAINER.md`).
+- Release automation startable by hand: refuses a version that disagrees with
+  `pyproject.toml`, `safesink/__init__.py` or `build_backend.py`, requires changelog
+  notes, runs every gate, then installs the published version back from PyPI.
+
+### Changed
+
+- The repository moved to `virajsabhaya23/safesink`; package URLs, docs, the action
+  reference, SARIF `helpUri`/`informationUri`, schema `$id` and the image path follow
+  it. GitHub redirects the old links. The `effectfence` import package, console
+  script and wire identifiers (`effectfence.mcp.v1`, `effectfence.mcp.report.v1`,
+  `effectfence.mcp.certificate.v1`) remain for compatibility.
+- The README leads with what the tool does and carries PyPI, Python, CI and license
+  badges, and states plainly that it is not the same project as the Rust/npm
+  EffectFence.
+- `--sandbox-observer` now means "also watch the sandbox" for any query observer, not
+  only SQLite.
+
+### Fixed
+
+- A directory argument described with the word "file" is no longer synthesized as a
+  file; directory signals are ranked rather than first-match.
+- `_role` and `_looks_like_path` match whole tokens, so `token_file` and
+  `timeout_path` are no longer treated as write destinations, and `profile` alone no
+  longer reads as a filesystem path.
+
+## 0.4.4 - 2026-11-21
+
+- Added `--sqlite-query DATABASE=SQL` (repeatable) to `mcp-check`, so database
+  servers are verified against the rows a query returns instead of a sandbox
+  file hash that their writes never touch. The flag replaces the sandbox
+  observer; `--sandbox-observer` adds it back when both boundaries matter.
+  Reports now list the configured observers and note when no filesystem
+  boundary was watched, because a pass over rows says nothing about files.
+- Synthesized arguments now give URL-shaped properties (`url`, `uri`, `href`,
+  `endpoint`, `webhook`, `format: uri`) a real URL, reusing an example URL from
+  the description when one is given, instead of an opaque probe string. On
+  network tools that turned a rejected call into a real observation.
+- SQL-shaped arguments (`sql`, `statement`, or a description mentioning SQL,
+  tables, rows, columns, a database or a schema) now get `select 1 as probe`,
+  which parses on SQLite, PostgreSQL and MySQL. A search tool's `query` is still
+  an opaque probe string.
+
 ## 0.4.3 - 2026-11-21
 
 - A tool that publishes no effect annotations and has no case `contract` is now
@@ -66,7 +160,7 @@ All notable changes will be documented here. This project follows Semantic Versi
   `docs/FROZEN_CRASH_RETRY.md`.
 - Fixed the broken distribution metadata: `pyproject.toml` and the wheel
   metadata point at the repository that actually exists
-  (`github.com/virajsabhaya23/effectfence`) instead of the nonexistent
+  (`github.com/virajsabhaya23/safesink`) instead of the nonexistent
   `virajsabhaya23/safesink`, and the README no longer tells readers to run a
   `pip install safesink` that 404s (the name is not on PyPI yet).
 - MCP reports no longer hardcode version `0.2.0`. The JSON report's
@@ -152,7 +246,7 @@ All notable changes will be documented here. This project follows Semantic Versi
 ## 0.3.0 - 2026-08-29
 
 - Renamed distribution to `safesink` (clean break from `effectfence` per issue #1). `pip install safesink`, `import safesink`, CLI `safesink`. `effectfence` remains as a deprecated alias (`import effectfence` warns, `effectfence` CLI forwards to `safesink`). Strategy `safesink` is an alias for `effectfence`; env vars `SAFESINK_*` preferred with `EFFECTFENCE_*` fallback.
-- New package `safesink` mirrors `effectfence` 0.2.x; wheel now contains both for transition. `CITATION.cff` and `pyproject.toml` point at `virajsabhaya23/effectfence`, the repository that hosts this code.
+- New package `safesink` mirrors `effectfence` 0.2.x; wheel now contains both for transition. `CITATION.cff` and `pyproject.toml` point at `virajsabhaya23/safesink`, the repository that hosts this code.
 
 ## 0.1.0 - 2026-08-16
 

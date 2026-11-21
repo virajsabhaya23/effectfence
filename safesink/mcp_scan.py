@@ -26,44 +26,122 @@ PROBE_MEDIA_NAME = "safesink-probe.png"
 PROBE_COPY_NAME = "safesink-probe-copy.txt"
 PROBE_DIR_NAME = "safesink-probe-dir"
 PROBE_TEXT = "safesink probe fixture\n"
+# A reachable, stable document: URL arguments need a real URL, not a placeholder
+# string, or every network tool answers with an argument error.
+PROBE_URL = "https://example.com/"
+# Valid on SQLite, PostgreSQL and MySQL without knowing any schema. Database
+# tools that require a particular table still fail, but harmlessly and
+# observably, instead of on a syntax error.
+PROBE_SQL = "select 1 as probe"
 
-# Property names that should resolve to a sandbox path rather than a bare string.
-_PATH_HINTS = (
+# The four MCP effect hints a contract may declare.
+HINT_NAMES = ("readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint")
+
+# Property-name tokens that name a filesystem location on their own. Matching is
+# per token, not per substring: ``profile_id`` contains "file" but names an
+# identifier, and synthesizing it as a path makes the server reject the call.
+_PATH_NAME_TOKENS = {
     "path",
+    "paths",
     "file",
+    "files",
     "filename",
-    "directory",
+    "filenames",
+    "filepath",
+    "filepaths",
     "dir",
+    "dirs",
+    "directory",
+    "directories",
     "folder",
+    "folders",
     "location",
+    "locations",
+}
+# Tokens that describe a location only when they are the entire name ("source",
+# "destination") or sit beside a path noun ("source_path"). Inside a longer
+# identifier they usually mean something else: ``source_language`` and
+# ``target_audience`` are not files.
+_WEAK_PATH_TOKENS = {
     "source",
     "src",
     "destination",
     "dest",
     "dst",
     "target",
-)
+    "from",
+    "to",
+}
 
 # Signals that a path argument must be a directory; pointing a file at these
 # yields tool errors that look like conformance findings but are argument bugs.
 # Whole words only: "dir" as a substring matches "directories" in the allowed-path
 # boilerplate that file tools carry, which then sends a directory to read_file.
 _DIRECTORY_HINTS = ("directory", "directories", "folder", "folders", "tree", "walk")
-_DIRECTORY_NAMES = {"dir", "directory", "folder", "dir_path", "directory_path"}
-_DIRECTORY_TOOL_HINTS = ("list_", "tree", "search", "glob", "walk", "ls_")
+_DIRECTORY_NAMES = {
+    "dir",
+    "directory",
+    "folder",
+    "dir_path",
+    "directory_path",
+    "root",
+    "root_path",
+    "folder_path",
+}
+_DIRECTORY_NAME_TOKENS = {"dir", "directory", "directories", "folder", "folders", "tree"}
+_FILE_NAME_TOKENS = {
+    "file",
+    "files",
+    "filename",
+    "filepath",
+    "media",
+    "image",
+    "photo",
+    "picture",
+    "png",
+    "jpeg",
+    "jpg",
+}
+_DIRECTORY_TOOL_HINTS = (
+    "list_",
+    "tree",
+    "search",
+    "glob",
+    "walk",
+    "ls_",
+    "directory",
+)
 
 # Signals that a path argument names media rather than text.
 _MEDIA_HINTS = ("media", "image", "photo", "picture", "png", "jpeg", "jpg")
 
 # Roles: a destination must be writable (and may not exist yet); a source must
 # already exist, otherwise the tool errors for reasons unrelated to conformance.
-_WRITE_ROLE_HINTS = ("destination", "dest", "dst", "target", "output", "out", "to")
-_READ_ROLE_HINTS = ("source", "src", "from", "input", "in", "origin")
+# Matched per token, because "to" inside "token" and "out" inside "timeout"
+# are not destination words.
+_WRITE_ROLE_TOKENS = {"destination", "dest", "dst", "target", "output", "out", "to"}
 
 # Many servers document a required identifier format with a quoted example, for
 # example "Exact library ID (e.g. '/mongodb/docs')". Reusing that example is the
 # difference between a rejected call and a real observation.
 _EXAMPLE_PATTERN = re.compile(r"['\"](/[^'\"\s,]+)['\"]")
+_URL_EXAMPLE_PATTERN = re.compile(r"https?://[^\s'\"<>),;]+")
+# "for example https://..." is the description telling us what shape it wants.
+_URL_HINT_PATTERN = re.compile(
+    r"(?:e\.g\.|for example|example:)[^.]{0,40}?(https?://[^\s'\"<>),;]+)",
+    re.IGNORECASE,
+)
+
+# Property names that carry a URL rather than an opaque string.
+_URL_NAME_TOKENS = {"url", "uri", "href", "endpoint", "webhook"}
+_URL_FORMATS = {"uri", "url", "iri"}
+
+# "query" alone is a search box as often as it is SQL, so SQL detection needs a
+# database word as well.
+_SQL_NAME_TOKENS = {"sql", "statement"}
+_SQL_TEXT_PATTERN = re.compile(
+    r"\b(sql|select|table|column|rows?|database|schema)\b", re.IGNORECASE
+)
 
 
 class ScanError(ValueError):
@@ -113,31 +191,46 @@ def seed_sandbox(root: str | Path) -> bool:
 
 
 def _looks_like_path(name: str) -> bool:
-    lowered = name.lower()
-    return any(hint in lowered for hint in _PATH_HINTS)
+    tokens = _name_tokens(name)
+    if tokens & _PATH_NAME_TOKENS:
+        return True
+    return len(tokens) == 1 and tokens <= _WEAK_PATH_TOKENS
 
 
 def _role(name: str) -> str:
-    lowered = name.lower()
-    if any(hint in lowered for hint in _WRITE_ROLE_HINTS):
+    tokens = _name_tokens(name)
+    if tokens & _WRITE_ROLE_TOKENS:
         return "write"
-    if any(hint in lowered for hint in _READ_ROLE_HINTS):
-        return "read"
+    # Defaults to read: a missing source file surfaces as a clear tool error,
+    # while a destination the server was told about but never seeded is silent.
     return "read"
 
 
+def _first_hint_position(text: str, hints: tuple[str, ...]) -> int | None:
+    lowered = text.lower()
+    positions = [lowered.find(hint) for hint in hints if hint in lowered]
+    return min(positions) if positions else None
+
+
 def _wants_directory(name: str, description: str, tool_name: str) -> bool:
+    # Explicit names always win, then the property name, then the tool's own
+    # purpose, and only then prose. Ranking before prose is what keeps
+    # search_files(path, "Directory to search for files") pointing at the seeded
+    # directory while read_text_file(path, "...a file...") still gets a file.
     if name.lower() in _DIRECTORY_NAMES:
         return True
-    property_text = f"{name} {description}".lower()
-    # A file noun wins: file tools mention "allowed directories" in their
-    # boilerplate, so testing for directory words first sends them a directory.
-    if "file" in property_text or any(hint in property_text for hint in _MEDIA_HINTS):
-        return False
-    if any(hint in property_text for hint in _DIRECTORY_HINTS):
+    tokens = _name_tokens(name)
+    if tokens & _DIRECTORY_NAME_TOKENS:
         return True
-    lowered_tool = tool_name.lower()
-    return any(hint in lowered_tool for hint in _DIRECTORY_TOOL_HINTS)
+    if tokens & _FILE_NAME_TOKENS:
+        return False
+    if any(hint in tool_name.lower() for hint in _DIRECTORY_TOOL_HINTS):
+        return True
+    directory_at = _first_hint_position(description, _DIRECTORY_HINTS)
+    file_at = _first_hint_position(description, ("file", *_MEDIA_HINTS))
+    if directory_at is None:
+        return False
+    return file_at is None or directory_at < file_at
 
 
 def _wants_media(name: str, description: str, tool_name: str) -> bool:
@@ -151,6 +244,42 @@ def _description_example(description: str) -> str | None:
         return None
     example = match.group(1)
     return example if len(example) > 2 else None
+
+
+def _name_tokens(name: str) -> set[str]:
+    # Split camelCase too, so ``fileUrl`` yields ``file`` and ``url`` rather than
+    # one opaque token that matches neither list.
+    spaced = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", name)
+    return set(re.findall(r"[a-z0-9]+", spaced.lower()))
+
+
+def _looks_like_url(name: str, schema: dict[str, Any]) -> bool:
+    if _name_tokens(name) & _URL_NAME_TOKENS:
+        return True
+    declared_format = schema.get("format")
+    if isinstance(declared_format, str) and declared_format.lower() in _URL_FORMATS:
+        return True
+    description = schema.get("description")
+    return isinstance(description, str) and _URL_HINT_PATTERN.search(description) is not None
+
+
+def _url_value(schema: dict[str, Any]) -> str:
+    description = schema.get("description")
+    if isinstance(description, str):
+        hinted = _URL_HINT_PATTERN.search(description)
+        match = _URL_EXAMPLE_PATTERN.search(description)
+        if hinted is not None:
+            return hinted.group(1).rstrip(".,;:")
+        if match is not None:
+            return match.group(0).rstrip(".,;:")
+    return PROBE_URL
+
+
+def _looks_like_sql(name: str, description: str, tool_name: str) -> bool:
+    if _name_tokens(name) & _SQL_NAME_TOKENS:
+        return True
+    text = f"{description} {tool_name}"
+    return _SQL_TEXT_PATTERN.search(text) is not None
 
 
 def _path_value(
@@ -210,9 +339,16 @@ def _scalar_for(
     if declared == "object":
         return synthesize_arguments(schema, sandbox=sandbox, tool_name=tool_name)
 
-    if sandbox and _looks_like_path(name):
-        return _path_value(name, schema, sandbox, tool_name, role)
     description = schema.get("description") if isinstance(schema.get("description"), str) else ""
+    # URL detection runs first: a property named ``file_url`` is a URL, not a
+    # sandbox path, even though it contains a path hint.
+    is_url = _looks_like_url(name, schema)
+    if sandbox and _looks_like_path(name) and not is_url:
+        return _path_value(name, schema, sandbox, tool_name, role)
+    if is_url:
+        return _url_value(schema)
+    if _looks_like_sql(name, description, tool_name):
+        return PROBE_SQL
     example = _description_example(description)
     if example is not None:
         return example
@@ -263,7 +399,22 @@ def list_server_tools(
     protocol_version: str = "2025-11-25",
     startup_timeout_seconds: float = 60.0,
     request_timeout_seconds: float = 60.0,
+    url: str | None = None,
+    headers_from_env: dict[str, str] | None = None,
+    allowed_hosts: tuple[str, ...] | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    if url:
+        from .http_transport import McpHttpClient
+
+        with McpHttpClient(
+            url,
+            headers_from_env=headers_from_env,
+            allowed_hosts=allowed_hosts or ("127.0.0.1", "localhost", "::1"),
+            protocol_version=protocol_version,
+            timeout_seconds=request_timeout_seconds,
+            startup_timeout_seconds=startup_timeout_seconds,
+        ) as client:
+            return client.list_tools(), dict(client.server_info)
     environment = restricted_environment(
         list(inherit_env or ["HOME"]), dict(env or {})
     )
@@ -278,6 +429,22 @@ def list_server_tools(
         return client.list_tools(), dict(client.server_info)
 
 
+def _database_observer_id(database: Path, used: set[str]) -> str:
+    stem = re.sub(r"[^a-z0-9]+", "-", database.stem.lower()).strip("-")
+    return _unique_observer_id(f"sqlite-{stem or 'db'}", used)
+
+
+def _unique_observer_id(base: str, used: set[str]) -> str:
+    base = re.sub(r"[^a-z0-9]+", "-", base.lower()).strip("-") or "observer"
+    candidate = base
+    suffix = 2
+    while candidate in used:
+        candidate = f"{base}-{suffix}"
+        suffix += 1
+    used.add(candidate)
+    return candidate
+
+
 def build_manifest(
     tools: list[dict[str, Any]],
     *,
@@ -290,10 +457,69 @@ def build_manifest(
     inherit_env: list[str] | None = None,
     env: dict[str, str] | None = None,
     protocol_version: str = "2025-11-25",
+    sqlite_queries: list[tuple[str, str]] | None = None,
+    include_sandbox_observer: bool = False,
+    capture_stderr: bool = False,
+    dry_run: bool = False,
+    contracts: dict[str, dict[str, bool]] | None = None,
+    contract_all: dict[str, bool] | None = None,
+    url: str | None = None,
+    headers_from_env: dict[str, str] | None = None,
+    allowed_hosts: tuple[str, ...] | None = None,
+    postgres_queries: list[tuple[str, str]] | None = None,
+    mysql_queries: list[tuple[str, str]] | None = None,
 ) -> dict[str, Any]:
-    """Turn advertised tools into a manifest, skipping tools we must not auto-call."""
+    """Turn advertised tools into a manifest, skipping tools we must not auto-call.
+
+    ``sqlite_queries`` adds one ``sqlite-query`` observer per ``(database, query)``
+    pair. Because a database server's observable state is its rows, supplying a
+    query replaces the sandbox file observer unless ``include_sandbox_observer``
+    asks for both.
+    """
 
     fixtures = seed_sandbox(observer_root)
+    observers: list[dict[str, Any]] = []
+    used_observer_ids: set[str] = set()
+    database_queries = list(sqlite_queries or [])
+    postgres = list(postgres_queries or [])
+    mysql = list(mysql_queries or [])
+    if include_sandbox_observer or not (database_queries or postgres or mysql):
+        observers.append(
+            {"id": "sandbox", "kind": "filesystem", "root": observer_root, "sensitive": False}
+        )
+        used_observer_ids.add("sandbox")
+    for database, query in database_queries:
+        resolved = Path(database).expanduser().resolve()
+        # A dry run observes nothing, so a missing database is not an error yet;
+        # it becomes one the moment the run would actually read rows.
+        if not dry_run and not resolved.is_file():
+            raise ScanError(
+                f"SQLite database to observe does not exist: {resolved}; create and seed it "
+                "before scanning"
+            )
+        observers.append(
+            {
+                "id": _database_observer_id(resolved, used_observer_ids),
+                "kind": "sqlite-query",
+                "database": str(resolved),
+                "query": query,
+                "sensitive": False,
+            }
+        )
+    for kind, queries in (("postgres-query", postgres), ("mysql-query", mysql)):
+        for environment_variable, query in queries:
+            observers.append(
+                {
+                    "id": _unique_observer_id(
+                        f"{kind.split('-')[0]}-{environment_variable}",
+                        used_observer_ids,
+                    ),
+                    "kind": kind,
+                    "dsnFromEnv": environment_variable,
+                    "query": query,
+                    "sensitive": False,
+                }
+            )
     cases: list[dict[str, Any]] = []
     skipped: list[dict[str, str]] = []
     used_ids: set[str] = set()
@@ -328,9 +554,16 @@ def build_manifest(
         annotations = tool.get("annotations") or {}
         contract = {
             hint: annotations[hint]
-            for hint in ("readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint")
+            for hint in HINT_NAMES
             if isinstance(annotations.get(hint), bool)
         }
+        # A policy of our own: a blanket contract applies to every tool, and a
+        # per-tool contract overrides it. This is the only way an unannotated
+        # server can be verified without hand-writing a manifest.
+        if contract_all:
+            contract.update(contract_all)
+        if contracts and name in contracts:
+            contract.update(contracts[name])
         if contract:
             case["contract"] = contract
         if setup_command:
@@ -343,32 +576,133 @@ def build_manifest(
             "every tool is declared destructive (use include_destructive to test them)"
         )
 
-    server: dict[str, Any] = {
-        "transport": "stdio",
-        "command": list(command),
-        "cwd": cwd,
-        "protocolVersion": protocol_version,
-    }
+    server: dict[str, Any]
+    if url:
+        server = {
+            "transport": "streamable-http",
+            "url": url,
+            "protocolVersion": protocol_version,
+        }
+        if headers_from_env:
+            server["headersFromEnv"] = dict(headers_from_env)
+        if allowed_hosts:
+            server["allowedHosts"] = list(allowed_hosts)
+    else:
+        server = {
+            "transport": "stdio",
+            "command": list(command),
+            "cwd": cwd,
+            "protocolVersion": protocol_version,
+        }
     if inherit_env:
         server["inheritEnv"] = list(inherit_env)
     if env:
         server["env"] = dict(env)
+    if capture_stderr:
+        server["captureStderr"] = True
 
+    generated: dict[str, Any] = {
+        "by": "safesink mcp-scan",
+        "skipped": skipped,
+        "toolsAdvertised": len(tools),
+        "probeFixtures": fixtures,
+    }
+    if contract_all or contracts:
+        # Recorded so a reader never mistakes a user-supplied contract for the
+        # server's own declaration.
+        generated["userContracts"] = {
+            "all": dict(contract_all or {}),
+            "tools": {name: dict(value) for name, value in (contracts or {}).items()},
+        }
+    if dry_run:
+        generated["plan"] = plan_manifest(tools, cases, observers)
     return {
         "schemaVersion": "effectfence.mcp.v1",
         "server": server,
-        "observers": [
-            {"id": "sandbox", "kind": "filesystem", "root": observer_root, "sensitive": False}
-        ],
+        "observers": observers,
         "cases": cases,
         "policy": {"minimumToolCoverage": minimum_tool_coverage},
-        "generated": {
-            "by": "safesink mcp-scan",
-            "skipped": skipped,
-            "toolsAdvertised": len(tools),
-            "probeFixtures": fixtures,
-        },
+        "generated": generated,
     }
+
+
+def plan_manifest(
+    tools: list[dict[str, Any]],
+    cases: list[dict[str, Any]],
+    observers: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """What a run would do, so a cautious user can review it before any call."""
+
+    kinds = {tool.get("name"): classify(tool) for tool in tools}
+    observer_ids = [observer["id"] for observer in observers]
+    return [
+        {
+            "tool": case["tool"],
+            "case": case["id"],
+            "kind": kinds.get(case["tool"], "unknown"),
+            "arguments": case.get("arguments", {}),
+            "observers": case.get("observerIds", observer_ids),
+            "contract": case.get("contract", {}),
+            "retry": bool(case.get("retry", False)),
+        }
+        for case in cases
+    ]
+
+
+def scaffold_manifest(
+    tools: list[dict[str, Any]],
+    *,
+    command: list[str],
+    observer_root: str,
+    cwd: str = ".",
+    include_destructive: bool = False,
+    inherit_env: list[str] | None = None,
+    env: dict[str, str] | None = None,
+    protocol_version: str = "2025-11-25",
+) -> dict[str, Any]:
+    """A hand-editable starting point, not a machine-generated verdict.
+
+    Every generated case is explicit about what a reviewer still has to decide:
+    a tool with no annotations gets an empty ``contract`` placeholder, so loading
+    the manifest and running it cannot silently pass an unchecked tool.
+    """
+    manifest = build_manifest(
+        tools,
+        command=command,
+        observer_root=observer_root,
+        cwd=cwd,
+        include_destructive=include_destructive,
+        inherit_env=inherit_env,
+        env=env,
+        protocol_version=protocol_version,
+    )
+    todo: list[dict[str, str]] = []
+    for tool in tools:
+        name = tool.get("name")
+        if not isinstance(name, str) or not name:
+            continue
+        annotations = tool.get("annotations") or {}
+        if not any(isinstance(annotations.get(hint), bool) for hint in HINT_NAMES):
+            todo.append(
+                {
+                    "tool": name,
+                    "action": (
+                        "the server publishes no annotations: fill the case contract, "
+                        "for example {\"readOnlyHint\": true}, before this case can verify it"
+                    ),
+                }
+            )
+    for case in manifest["cases"]:
+        annotations = next(
+            (tool.get("annotations") or {} for tool in tools if tool.get("name") == case["tool"]),
+            {},
+        )
+        if not any(isinstance(annotations.get(hint), bool) for hint in HINT_NAMES):
+            case["contract"] = {}
+        case.pop("generatedArguments", None)
+    manifest["generated"]["by"] = "safesink init"
+    manifest["generated"]["todo"] = todo
+    return manifest
 
 
 def write_manifest(manifest: dict[str, Any], destination: str | Path) -> Path:

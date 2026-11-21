@@ -4,18 +4,22 @@ import hashlib
 import json
 import os
 import platform
+import re
 import subprocess
 import time
 from pathlib import Path
 from typing import Any
 
+from .http_transport import McpHttpClient
 from .mcp_client import McpClientError, McpStdioClient, restricted_environment
 from .observers import (
     Delta,
     FilesystemObserver,
     HttpJsonObserver,
+    MySqlQueryObserver,
     Observer,
     ObserverError,
+    PostgresQueryObserver,
     Snapshot,
     SqliteQueryObserver,
     canonical_digest,
@@ -24,6 +28,24 @@ from .observers import (
 
 REPORT_SCHEMA = "effectfence.mcp.report.v1"
 MANIFEST_SCHEMA = "effectfence.mcp.v1"
+
+# The score is part of the contract: badges, leaderboards and agent gates all
+# consume one number, so the weights are named here and the formula is versioned.
+# A lie about a claim is the worst finding, an error mismatch is next, an
+# unverifiable case is never free, and an unobserved tool is a coverage gap.
+SCORE_VERSION = "1"
+SCORE_VIOLATION_WEIGHTS = {
+    "READ_ONLY_HINT_MISMATCH": 25,
+    "IDEMPOTENT_HINT_MISMATCH": 25,
+    "NON_DESTRUCTIVE_HINT_MISMATCH": 15,
+    "CLOSED_WORLD_HINT_MISMATCH": 15,
+    "TOOL_ERROR_EXPECTATION_MISMATCH": 10,
+    "RETRY_TOOL_ERROR_EXPECTATION_MISMATCH": 10,
+    "AMBIGUOUS_RESULT_DUPLICATE_ON_RETRY": 20,
+}
+SCORE_DEFAULT_VIOLATION_WEIGHT = 10
+SCORE_INCONCLUSIVE_WEIGHT = 10
+SCORE_COVERAGE_WEIGHT = 20
 
 
 class ManifestError(ValueError):
@@ -44,7 +66,20 @@ def load_manifest(path: str | Path) -> tuple[dict[str, Any], Path]:
     return manifest, manifest_path
 
 
-def verify_manifest(path: str | Path) -> dict[str, Any]:
+def verify_manifest(
+    path: str | Path,
+    *,
+    capture_stderr: bool = False,
+    timeout_seconds: float | None = None,
+    baseline: dict[str, Any] | None = None,
+    baseline_path: str | Path | None = None,
+    new_only: bool = False,
+    suppressions: dict[str, Any] | None = None,
+    suppression_path: str | Path | None = None,
+    fail_on_suppressed: bool = False,
+    restart_per_case: bool | None = None,
+    case_order: str | None = None,
+) -> dict[str, Any]:
     # Imported lazily: this module is imported while ``safesink/__init__`` runs,
     # so the package version does not exist yet at module-import time.
     from . import __version__ as package_version
@@ -61,39 +96,90 @@ def verify_manifest(path: str | Path) -> dict[str, Any]:
         observers = _build_observers(manifest.get("observers", []), base)
     except ObserverError as error:
         raise ManifestError(str(error)) from error
+    # The report has to say which boundary was watched: a pass over rows says
+    # nothing about files, and vice versa.
+    observer_summary = [
+        {
+            "id": item["id"],
+            "kind": item["kind"],
+            "world": item.get(
+                "world", "open" if item["kind"] == "http-json" else "closed"
+            ),
+            "sensitive": bool(item.get("sensitive", True)),
+        }
+        for item in manifest.get("observers", [])
+    ]
+    budget = timeout_seconds
+    if budget is None:
+        declared_budget = manifest.get("policy", {}).get("runTimeoutSeconds")
+        budget = float(declared_budget) if declared_budget is not None else None
+    if budget is not None and budget <= 0:
+        raise ManifestError("run timeout must be positive")
+    restart = (
+        restart_per_case
+        if restart_per_case is not None
+        else bool(server.get("restartPerCase", False))
+    )
+    ordering = case_order or str(server.get("caseOrder", "file"))
+    ordered_cases = _order_cases(manifest, ordering)
     started = time.time()
+    budget_exhausted = False
     results: list[dict[str, Any]] = []
-    fatal_error: str | None = None
+    # A fatal error has to say where it happened: a 40-case scan that dies on
+    # case 31 should not read like one that never started.
+    fatal_error: dict[str, Any] | None = None
+    phase = "startup"
+    current_case: str | None = None
     tools: list[dict[str, Any]] = []
     client: McpStdioClient | None = None
+    restarts = 0
     try:
-        client = McpStdioClient(
-            list(server["command"]),
-            cwd=server_cwd,
-            environment=environment,
-            request_timeout_seconds=float(server.get("requestTimeoutSeconds", 30)),
-            startup_timeout_seconds=float(server.get("startupTimeoutSeconds", 15)),
-            protocol_version=str(server.get("protocolVersion", "2025-11-25")),
-            max_message_bytes=int(server.get("maxMessageBytes", 8 * 1024 * 1024)),
-        )
+        client = _new_client(server, server_cwd, environment)
         client.start()
+        phase = "tools/list"
         tools = client.list_tools(max_pages=int(server.get("maxListPages", 100)))
         indexed_tools = {tool["name"]: tool for tool in tools}
-        for case in manifest["cases"]:
-            results.append(
-                _run_case(
-                    case,
-                    client=client,
-                    tool=indexed_tools.get(case["tool"]),
-                    observers=observers,
-                    base=base,
-                    server_environment=environment,
+        phase = "case"
+        server_instance = 0
+        for index, case in enumerate(ordered_cases):
+            current_case = case["id"]
+            # One hanging tool must not stall a CI gate for timeout x cases. When
+            # the budget is spent, the remaining cases are reported as unverified
+            # rather than silently dropped.
+            if budget is not None and time.time() - started > budget:
+                budget_exhausted = True
+                results.extend(
+                    _unbudgeted_case(remaining, server_instance)
+                    for remaining in ordered_cases[index:]
                 )
+                break
+            if restart and index > 0:
+                # A stateful server carries locks, caches and sessions into the
+                # next case; a fresh process is the only way to attribute a delta.
+                client.close()
+                restarts += 1
+                server_instance += 1
+                client = _new_client(server, server_cwd, environment)
+                client.start()
+            result = _run_case(
+                case,
+                client=client,
+                tool=indexed_tools.get(case["tool"]),
+                observers=observers,
+                base=base,
+                server_environment=environment,
             )
+            result["serverInstance"] = server_instance
+            results.append(result)
     except (McpClientError, ObserverError, OSError, ValueError) as error:
-        fatal_error = _safe_error(error)
+        fatal_error = {
+            "message": _safe_error(error),
+            "phase": phase,
+            "case": current_case,
+        }
     finally:
         stderr_present = bool(client and client.stderr_tail)
+        want_stderr = capture_stderr or bool(server.get("captureStderr", False))
         server_metadata = {
             "name": client.server_info.get("name") if client else None,
             "version": client.server_info.get("version") if client else None,
@@ -102,9 +188,36 @@ def verify_manifest(path: str | Path) -> dict[str, Any]:
                 client.negotiated_protocol_version if client else None
             ),
             "stderr_present": stderr_present,
+            "restarts": restarts,
+            "restartPerCase": restart,
+            "caseOrder": ordering,
         }
+        if want_stderr and client and client.stderr_tail:
+            server_metadata["stderrExcerpt"] = _stderr_excerpt(client.stderr_tail)
         if client:
             client.close()
+
+    suppression_info: dict[str, Any] | None = None
+    if suppressions is not None:
+        suppression_info = _apply_suppressions(results, suppressions)
+        suppression_info["path"] = (
+            str(suppression_path) if suppression_path else None
+        )
+        if fail_on_suppressed and suppression_info["suppressedCount"]:
+            suppression_info["failOnSuppressed"] = True
+    baseline_info: dict[str, Any] | None = None
+    if new_only:
+        if baseline is None:
+            raise ManifestError("--new-only requires a baseline report")
+        baseline_info = _apply_baseline(results, baseline)
+        baseline_info["path"] = str(baseline_path) if baseline_path else None
+        if baseline_path:
+            try:
+                baseline_info["sha256"] = hashlib.sha256(
+                    Path(baseline_path).read_bytes()
+                ).hexdigest()
+            except OSError:
+                baseline_info["sha256"] = None
 
     listed_names = {tool["name"] for tool in tools}
     tested_names = {case["tool"] for case in manifest["cases"]}
@@ -133,6 +246,13 @@ def verify_manifest(path: str | Path) -> dict[str, Any]:
         )
 
     # Three outcomes, because "could not verify" is neither a pass nor a finding.
+    if suppression_info and suppression_info.get("failOnSuppressed"):
+        policy_violations.append(
+            {
+                "code": "SUPPRESSED_FINDINGS_NOT_ALLOWED",
+                "message": "--fail-on-suppressed forbids accepting a finding, even with a reason",
+            }
+        )
     failed = (
         fatal_error is not None
         or bool(policy_violations)
@@ -166,15 +286,320 @@ def verify_manifest(path: str | Path) -> dict[str, Any]:
         },
         "policyViolations": policy_violations,
         "fatalError": fatal_error,
+        "runBudget": {
+            "timeoutSeconds": budget,
+            "exhausted": budget_exhausted,
+        },
+        "baseline": baseline_info,
+        "suppressions": suppression_info,
+        "observers": observer_summary,
         "cases": results,
-        "limitations": [
-            "Only configured observers define the observable side-effect boundary.",
-            "External reads cannot be inferred from state snapshots.",
-            "HTTP JSON observers detect state change but cannot classify deletion.",
-        ],
+        "limitations": _limitations(observer_summary),
     }
+    report["score"] = _score(
+        results, coverage_ratio, required_coverage, policy_violations, fatal_error
+    )
     report["certificateSha256"] = canonical_digest(report)
     return report
+
+
+def _score(
+    results: list[dict[str, Any]],
+    coverage_ratio: float,
+    required_coverage: float,
+    policy_violations: list[dict[str, Any]],
+    fatal_error: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Derive one comparable number from evidence, never from optimism."""
+    violation_counts: dict[str, int] = {}
+    for case in results:
+        for violation in case.get("violations", []):
+            code = str(violation.get("code", "UNKNOWN"))
+            violation_counts[code] = violation_counts.get(code, 0) + 1
+        for violation in policy_violations:
+            code = str(violation.get("code", "UNKNOWN"))
+            violation_counts[code] = violation_counts.get(code, 0) + 1
+    inconclusive = sum(1 for case in results if case.get("inconclusive"))
+    violation_points = sum(
+        SCORE_VIOLATION_WEIGHTS.get(code, SCORE_DEFAULT_VIOLATION_WEIGHT) * count
+        for code, count in violation_counts.items()
+    )
+    inconclusive_points = SCORE_INCONCLUSIVE_WEIGHT * inconclusive
+    # Only the shortfall against the declared policy is a deduction: a curated
+    # manifest that deliberately covers 3 of 7 tools has not failed its contract.
+    coverage_shortfall = max(0.0, required_coverage - coverage_ratio)
+    coverage_points = round(SCORE_COVERAGE_WEIGHT * coverage_shortfall, 2)
+    fatal_points = 25 if fatal_error else 0
+    value = max(0, round(100 - violation_points - inconclusive_points - coverage_points - fatal_points))
+    return {
+        "value": value,
+        "version": SCORE_VERSION,
+        "formula": (
+            "100 - 25*READ_ONLY/IDEMPOTENT mismatch - 15*NON_DESTRUCTIVE/CLOSED_WORLD "
+            "mismatch - 10*other violation - 20*AMBIGUOUS_RESULT_DUPLICATE_ON_RETRY "
+            "- 10*inconclusive case - 20*coverage shortfall below policy "
+            "- 25*fatal error, floored at 0"
+        ),
+        "inputs": {
+            "violations": violation_counts,
+            "inconclusiveCases": inconclusive,
+            "coverageRatio": round(coverage_ratio, 6),
+            "requiredCoverage": required_coverage,
+            "requiredCoverage": required_coverage,
+            "fatalError": fatal_error is not None,
+        },
+    }
+
+
+def _suppression_matches(
+    entry: dict[str, Any], case: dict[str, Any], code: str
+) -> bool:
+    if entry.get("code") != code:
+        return False
+    if "caseId" in entry:
+        return entry["caseId"] == case["id"]
+    if "tool" in entry:
+        return entry["tool"] == case.get("tool")
+    return False
+
+
+def _suppression_expired(expires: str, today: str) -> bool:
+    # ISO dates sort lexicographically, so this needs no date parsing heuristics.
+    return expires[:10] < today
+
+
+def _apply_suppressions(
+    results: list[dict[str, Any]], suppressions: dict[str, Any]
+) -> dict[str, Any]:
+    """Accept a finding only with a reason and an expiry, and never silently.
+
+    An expired entry is itself a finding, an entry that matches nothing is
+    reported stale, and every applied suppression is listed with its reason so a
+    reader can judge the acceptance rather than just see a green run.
+    """
+    from datetime import datetime, timezone
+
+    today = datetime.now(timezone.utc).date().isoformat()
+    entries = suppressions.get("suppressions", [])
+    used: set[int] = set()
+    applied: list[dict[str, Any]] = []
+    expired: list[dict[str, Any]] = []
+    for case in results:
+        remaining: list[dict[str, Any]] = []
+        for violation in case.get("violations", []):
+            match_index = next(
+                (
+                    index
+                    for index, entry in enumerate(entries)
+                    if _suppression_matches(entry, case, str(violation.get("code")))
+                ),
+                None,
+            )
+            if match_index is None:
+                remaining.append(violation)
+                continue
+            entry = entries[match_index]
+            if _suppression_expired(str(entry["expires"]), today):
+                expired.append(
+                    {
+                        "caseId": case["id"],
+                        "tool": case.get("tool"),
+                        "code": violation.get("code"),
+                        "expires": entry["expires"],
+                    }
+                )
+                remaining.append(
+                    {
+                        "code": "SUPPRESSION_EXPIRED",
+                        "message": (
+                            f"the suppression for {violation.get('code')} expired on "
+                            f"{entry['expires']}; renew it with a fresh reason or fix "
+                            "the finding"
+                        ),
+                    }
+                )
+                continue
+            used.add(match_index)
+            applied.append(
+                {
+                    "caseId": case["id"],
+                    "tool": case.get("tool"),
+                    "code": violation.get("code"),
+                    "reason": entry.get("reason"),
+                    "owner": entry.get("owner"),
+                    "expires": entry.get("expires"),
+                }
+            )
+        case["violations"] = remaining
+        case["passed"] = not remaining and not case.get("inconclusive")
+    unmatched = [entry for index, entry in enumerate(entries) if index not in used]
+    return {
+        "suppressedCount": len(applied),
+        "applied": applied,
+        "expired": expired,
+        "unmatched": unmatched,
+    }
+
+
+def _apply_baseline(
+    results: list[dict[str, Any]], baseline: dict[str, Any]
+) -> dict[str, Any]:
+    """Drop findings the baseline already recorded, and report what changed.
+
+    The key is ``(caseId, code)`` rather than the message: a message can change
+    while the finding stays the same, and a case whose declaration source moves
+    from an annotation to a contract is still the same case. Nothing is hidden:
+    every suppressed finding is listed with its reason, and a finding that is not
+    in the baseline still fails the run.
+    """
+    known: set[tuple[str, str]] = set()
+    for case in baseline.get("cases", []):
+        if not isinstance(case, dict):
+            continue
+        case_id = str(case.get("id"))
+        for violation in case.get("violations", []) or []:
+            if isinstance(violation, dict):
+                known.add((case_id, str(violation.get("code"))))
+
+    suppressed: list[dict[str, Any]] = []
+    regressions: list[dict[str, Any]] = []
+    current: set[tuple[str, str]] = set()
+    for case in results:
+        remaining: list[dict[str, Any]] = []
+        for violation in case.get("violations", []):
+            key = (case["id"], str(violation.get("code")))
+            current.add(key)
+            if key in known:
+                suppressed.append(
+                    {
+                        "caseId": case["id"],
+                        "tool": case.get("tool"),
+                        "code": violation.get("code"),
+                        "reason": "recorded in the baseline",
+                    }
+                )
+            else:
+                remaining.append(violation)
+                regressions.append(
+                    {"caseId": case["id"], "code": violation.get("code")}
+                )
+        case["violations"] = remaining
+        case["passed"] = not remaining and not case.get("inconclusive")
+    fixed = sorted(f"{case_id}:{code}" for case_id, code in known - current)
+    summary: list[str] = []
+    if regressions:
+        summary.append("BASELINE_REGRESSION")
+    if fixed:
+        summary.append("BASELINE_FIXED")
+    return {
+        "summary": summary,
+        "suppressedCount": len(suppressed),
+        "suppressed": suppressed,
+        "regressions": regressions,
+        "fixed": fixed,
+        "fixedCount": len(fixed),
+    }
+
+
+def _new_client(
+    server: dict[str, Any], server_cwd: Path, environment: dict[str, str]
+) -> Any:
+    """Construct a client without starting it, so a failed start keeps stderr."""
+    if server.get("transport", "stdio") == "streamable-http":
+        return McpHttpClient(
+            str(server["url"]),
+            headers_from_env=_string_map(server.get("headersFromEnv", {}), "server.headersFromEnv"),
+            allowed_hosts=tuple(
+                _string_list(
+                    server.get("allowedHosts", ["127.0.0.1", "localhost", "::1"]),
+                    "server.allowedHosts",
+                )
+            ),
+            protocol_version=str(server.get("protocolVersion", "2025-11-25")),
+            timeout_seconds=float(server.get("requestTimeoutSeconds", 30)),
+            startup_timeout_seconds=float(server.get("startupTimeoutSeconds", 15)),
+            max_response_bytes=int(server.get("maxMessageBytes", 8 * 1024 * 1024)),
+        )
+    return McpStdioClient(
+        list(server["command"]),
+        cwd=server_cwd,
+        environment=environment,
+        request_timeout_seconds=float(server.get("requestTimeoutSeconds", 30)),
+        startup_timeout_seconds=float(server.get("startupTimeoutSeconds", 15)),
+        protocol_version=str(server.get("protocolVersion", "2025-11-25")),
+        max_message_bytes=int(server.get("maxMessageBytes", 8 * 1024 * 1024)),
+    )
+
+
+def _order_cases(
+    manifest: dict[str, Any], ordering: str
+) -> list[dict[str, Any]]:
+    cases = list(manifest["cases"])
+    if ordering == "name":
+        return sorted(cases, key=lambda case: case["id"])
+    if ordering == "manifest":
+        declared = manifest.get("caseOrder")
+        if not isinstance(declared, list):
+            return cases
+        index = {str(case_id): position for position, case_id in enumerate(declared)}
+        return sorted(
+            cases,
+            key=lambda case: (index.get(case["id"], len(index)), cases.index(case)),
+        )
+    return cases
+
+
+def _unbudgeted_case(
+    case: dict[str, Any], server_instance: int = 0
+) -> dict[str, Any]:
+    """A case the run never reached because the time budget was spent."""
+    return {
+        "id": case["id"],
+        "tool": case["tool"],
+        "argumentShapeSha256": canonical_digest(
+            _value_shape(case.get("arguments", {}))
+        ),
+        "argumentKeys": sorted(case.get("arguments", {})),
+        "passed": False,
+        "durationMs": 0,
+        "declarations": {},
+        "calls": [],
+        "deltas": {"firstCall": [], "retry": []},
+        "serverInstance": server_instance,
+        "violations": [],
+        "inconclusive": [
+            {
+                "code": "RUN_BUDGET_EXHAUSTED",
+                "message": (
+                    "the run-level time budget was spent before this case ran; "
+                    "raise --timeout or policy.runTimeoutSeconds to verify it"
+                ),
+            }
+        ],
+    }
+
+
+def _limitations(observers: list[dict[str, Any]]) -> list[str]:
+    kinds = {observer["kind"] for observer in observers}
+    limitations = [
+        "Only configured observers define the observable side-effect boundary.",
+        "External reads cannot be inferred from state snapshots.",
+    ]
+    if "http-json" in kinds:
+        limitations.append(
+            "HTTP JSON observers detect state change but cannot classify deletion."
+        )
+    if "sqlite-query" in kinds:
+        limitations.append(
+            "A SQLite observer compares only the rows its query returns; writes "
+            "outside that result set are not observed."
+        )
+    if "filesystem" not in kinds:
+        limitations.append(
+            "No filesystem observer was configured, so file writes are outside "
+            "the observed boundary."
+        )
+    return limitations
 
 
 def _run_case(
@@ -655,6 +1080,20 @@ def _build_observers(items: list[dict[str, Any]], base: Path) -> dict[str, Obser
                 tuple(item.get("parameters", [])),
                 **common,
             )
+        elif item["kind"] in {"postgres-query", "mysql-query"}:
+            observer_class = (
+                PostgresQueryObserver
+                if item["kind"] == "postgres-query"
+                else MySqlQueryObserver
+            )
+            observer = observer_class(
+                observer_id,
+                str(item["dsnFromEnv"]),
+                item["query"],
+                tuple(item.get("parameters", [])),
+                statement_timeout_ms=int(item.get("statementTimeoutMs", 5000)),
+                **common,
+            )
         elif item["kind"] == "http-json":
             observer = HttpJsonObserver(
                 observer_id,
@@ -700,15 +1139,65 @@ def _run_hook(hook: dict[str, Any], base: Path, server_environment: dict[str, st
         )
 
 
+def load_suppressions(path: str | Path) -> dict[str, Any]:
+    """Validate a suppressions file. Every entry needs a reason and an expiry."""
+    from datetime import date
+
+    try:
+        value = json.loads(Path(path).read_text(encoding="utf-8"))
+    except OSError as error:
+        raise ManifestError(f"could not read suppressions: {error}") from error
+    except json.JSONDecodeError as error:
+        raise ManifestError(f"suppressions file is invalid JSON: {error}") from error
+    if not isinstance(value, dict) or not isinstance(value.get("suppressions"), list):
+        raise ManifestError("suppressions file must be an object with a suppressions array")
+    for index, entry in enumerate(value["suppressions"]):
+        label = f"suppressions[{index}]"
+        if not isinstance(entry, dict):
+            raise ManifestError(f"{label} must be an object")
+        if not isinstance(entry.get("code"), str) or not entry["code"]:
+            raise ManifestError(f"{label} requires a finding code")
+        if ("caseId" in entry) == ("tool" in entry):
+            raise ManifestError(f"{label} requires exactly one of caseId or tool")
+        if not isinstance(entry.get("reason"), str) or not entry["reason"].strip():
+            raise ManifestError(f"{label} requires a non-empty reason")
+        expires = entry.get("expires")
+        if not isinstance(expires, str):
+            raise ManifestError(f"{label} requires an ISO expiry date")
+        try:
+            date.fromisoformat(expires[:10])
+        except ValueError as error:
+            raise ManifestError(f"{label} expires must be YYYY-MM-DD") from error
+        if "owner" in entry and not isinstance(entry["owner"], str):
+            raise ManifestError(f"{label} owner must be a string")
+    return value
+
+
 def _validate_manifest(manifest: dict[str, Any]) -> None:
     if manifest.get("schemaVersion") != MANIFEST_SCHEMA:
         raise ManifestError(f"schemaVersion must be {MANIFEST_SCHEMA!r}")
     server = manifest.get("server")
     if not isinstance(server, dict):
         raise ManifestError("server must be an object")
-    _command(server.get("command"), "server.command")
-    if server.get("transport", "stdio") != "stdio":
-        raise ManifestError("server.transport must be 'stdio'")
+    transport = server.get("transport", "stdio")
+    if transport not in {"stdio", "streamable-http"}:
+        raise ManifestError("server.transport must be 'stdio' or 'streamable-http'")
+    if transport == "stdio":
+        _command(server.get("command"), "server.command")
+    else:
+        if not isinstance(server.get("url"), str) or not server["url"]:
+            raise ManifestError("server.url is required for streamable-http")
+        _string_map(server.get("headersFromEnv", {}), "server.headersFromEnv")
+        _string_list(
+            server.get("allowedHosts", ["127.0.0.1", "localhost", "::1"]),
+            "server.allowedHosts",
+        )
+    if "captureStderr" in server and not isinstance(server["captureStderr"], bool):
+        raise ManifestError("server.captureStderr must be a boolean")
+    if "restartPerCase" in server and not isinstance(server["restartPerCase"], bool):
+        raise ManifestError("server.restartPerCase must be a boolean")
+    if server.get("caseOrder", "file") not in {"file", "name", "manifest"}:
+        raise ManifestError("server.caseOrder must be file, name or manifest")
     cases = manifest.get("cases")
     if not isinstance(cases, list) or not cases:
         raise ManifestError("cases must be a non-empty array")
@@ -729,14 +1218,24 @@ def _validate_manifest(manifest: dict[str, Any]) -> None:
         required = {
             "filesystem": "root",
             "sqlite-query": "database",
+            "postgres-query": "dsnFromEnv",
+            "mysql-query": "dsnFromEnv",
             "http-json": "url",
         }
         if kind not in required:
             raise ManifestError(f"unsupported observer kind: {kind!r}")
         if required[kind] not in item:
             raise ManifestError(f"observer {observer_id!r} requires {required[kind]!r}")
-        if kind == "sqlite-query" and not isinstance(item.get("query"), str):
+        if kind in {"sqlite-query", "postgres-query", "mysql-query"} and not isinstance(
+            item.get("query"), str
+        ):
             raise ManifestError(f"observer {observer_id!r} requires a query")
+        if kind in {"postgres-query", "mysql-query"} and not isinstance(
+            item.get("dsnFromEnv"), str
+        ):
+            raise ManifestError(
+                f"observer {observer_id!r} requires dsnFromEnv (never a literal DSN)"
+            )
         if item.get("world", "closed") not in {"closed", "open"}:
             raise ManifestError("observer world must be 'closed' or 'open'")
     case_ids: set[str] = set()
@@ -817,9 +1316,19 @@ def _validate_manifest(manifest: dict[str, Any]) -> None:
                 raise ManifestError(
                     f"case {case_id!r} ambiguousResultFault.timeoutMs must be positive"
                 )
-    minimum = manifest.get("policy", {}).get("minimumToolCoverage", 0)
+    policy = manifest.get("policy", {})
+    if not isinstance(policy, dict):
+        raise ManifestError("policy must be an object")
+    minimum = policy.get("minimumToolCoverage", 0)
     if not isinstance(minimum, (int, float)) or isinstance(minimum, bool) or not 0 <= minimum <= 1:
         raise ManifestError("policy.minimumToolCoverage must be between 0 and 1")
+    run_timeout = policy.get("runTimeoutSeconds")
+    if run_timeout is not None and (
+        not isinstance(run_timeout, (int, float))
+        or isinstance(run_timeout, bool)
+        or run_timeout <= 0
+    ):
+        raise ManifestError("policy.runTimeoutSeconds must be a positive number")
 
 
 def _command(value: Any, label: str) -> list[str]:
@@ -847,6 +1356,20 @@ def _string_map(value: Any, label: str) -> dict[str, str]:
 def _resolve_path(base: Path, value: str) -> Path:
     path = Path(value)
     return path.resolve() if path.is_absolute() else (base / path).resolve()
+
+
+# Bounded, and redacted even when the user opted in: server stderr is where
+# credentials leak, and an excerpt is for diagnosis, not for copying secrets into
+# an artifact that gets uploaded.
+_SECRET_IN_STDERR = re.compile(
+    r"(?i)\b(token|secret|password|passwd|api[_-]?key|authorization|bearer)"
+    r"(\s*[:=]\s*)(\S+)"
+)
+
+
+def _stderr_excerpt(text: str, limit: int = 4000) -> str:
+    redacted = _SECRET_IN_STDERR.sub(lambda match: f"{match.group(1)}{match.group(2)}[redacted]", text)
+    return redacted[-limit:]
 
 
 def _safe_error(error: BaseException) -> str:

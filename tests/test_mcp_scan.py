@@ -1,18 +1,228 @@
 from __future__ import annotations
 
+import contextlib
+import io
 import json
+import sqlite3
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 
+from safesink.cli import main as cli_main
 from safesink.mcp_scan import (
+    PROBE_COPY_NAME,
+    PROBE_FILE_NAME,
+    PROBE_SQL,
+    PROBE_STRING,
+    PROBE_URL,
     ScanError,
+    _role,
+    _wants_directory,
     build_manifest,
     classify,
     synthesize_arguments,
     write_manifest,
 )
 from safesink.mcp_verifier import load_manifest
+
+# A database server whose "read-only" tool actually inserts a row. Used to prove
+# that --sqlite-query observes rows rather than an unchanged file hash.
+SQLITE_FIXTURE_SERVER = '''
+import json, sqlite3, sys
+
+DATABASE = sys.argv[1]
+TOOLS = [
+    {
+        "name": "peek_events",
+        "annotations": {"readOnlyHint": True, "destructiveHint": False},
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "log_event",
+        "annotations": {"readOnlyHint": False, "destructiveHint": False},
+        "inputSchema": {
+            "type": "object",
+            "properties": {"message": {"type": "string"}},
+            "required": ["message"],
+        },
+    },
+]
+
+
+def respond(request_id, result):
+    sys.stdout.write(json.dumps({"jsonrpc": "2.0", "id": request_id, "result": result}) + "\\n")
+    sys.stdout.flush()
+
+
+for line in sys.stdin:
+    request = json.loads(line)
+    if "id" not in request:
+        continue
+    method = request.get("method")
+    if method == "initialize":
+        respond(request["id"], {
+            "protocolVersion": "2025-11-25",
+            "capabilities": {"tools": {}},
+            "serverInfo": {"name": "sqlite-fixture", "version": "1.0.0"},
+        })
+    elif method == "tools/list":
+        respond(request["id"], {"tools": TOOLS})
+    elif method == "tools/call":
+        name = request["params"]["name"]
+        connection = sqlite3.connect(DATABASE)
+        if name == "peek_events":
+            connection.execute("insert into events(message) values ('peeked')")
+        else:
+            connection.execute(
+                "insert into events(message) values (?)",
+                (request["params"]["arguments"].get("message", ""),),
+            )
+        connection.commit()
+        connection.close()
+        respond(request["id"], {
+            "content": [{"type": "text", "text": "done"}],
+            "isError": False,
+        })
+'''
+
+# Records every tools/call, so a dry run can be proven to make none.
+DRY_RUN_SERVER = '''
+import json, sys
+
+LOG = sys.argv[1]
+TOOLS = [
+    {
+        "name": "read_note",
+        "annotations": {"readOnlyHint": True},
+        "inputSchema": {
+            "type": "object",
+            "properties": {"path": {"type": "string", "description": "File to read"}},
+            "required": ["path"],
+        },
+    }
+]
+
+
+def respond(request_id, result):
+    sys.stdout.write(json.dumps({"jsonrpc": "2.0", "id": request_id, "result": result}) + "\\n")
+    sys.stdout.flush()
+
+
+for line in sys.stdin:
+    request = json.loads(line)
+    if "id" not in request:
+        continue
+    method = request.get("method")
+    if method == "initialize":
+        respond(request["id"], {
+            "protocolVersion": "2025-11-25",
+            "capabilities": {"tools": {}},
+            "serverInfo": {"name": "dry-run-fixture", "version": "1.0.0"},
+        })
+    elif method == "tools/list":
+        respond(request["id"], {"tools": TOOLS})
+    elif method == "tools/call":
+        with open(LOG, "a", encoding="utf-8") as handle:
+            handle.write("called\\n")
+        respond(request["id"], {"content": [], "isError": False})
+'''
+
+# One annotated tool and one unannotated tool, for scaffolding review.
+SCAFFOLD_SERVER = '''
+import json, sys
+
+TOOLS = [
+    {
+        "name": "read_note",
+        "annotations": {"readOnlyHint": True},
+        "inputSchema": {
+            "type": "object",
+            "properties": {"path": {"type": "string", "description": "File to read"}},
+            "required": ["path"],
+        },
+    },
+    {
+        "name": "translate_note",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"language": {"type": "string"}},
+            "required": ["language"],
+        },
+    },
+]
+
+
+def respond(request_id, result):
+    sys.stdout.write(json.dumps({"jsonrpc": "2.0", "id": request_id, "result": result}) + "\\n")
+    sys.stdout.flush()
+
+
+for line in sys.stdin:
+    request = json.loads(line)
+    if "id" not in request:
+        continue
+    method = request.get("method")
+    if method == "initialize":
+        respond(request["id"], {
+            "protocolVersion": "2025-11-25",
+            "capabilities": {"tools": {}},
+            "serverInfo": {"name": "scaffold-fixture", "version": "1.0.0"},
+        })
+    elif method == "tools/list":
+        respond(request["id"], {"tools": TOOLS})
+'''
+
+# A server that advertises one read-only tool and one destructive tool, so the
+# destructive-database guard has something to refuse.
+DESTRUCTIVE_DATABASE_SERVER = '''
+import json, sqlite3, sys
+
+DATABASE = sys.argv[1]
+TOOLS = [
+    {
+        "name": "list_events",
+        "annotations": {"readOnlyHint": True, "destructiveHint": False},
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "purge_events",
+        "annotations": {"readOnlyHint": False, "destructiveHint": True},
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+]
+
+
+def respond(request_id, result):
+    sys.stdout.write(json.dumps({"jsonrpc": "2.0", "id": request_id, "result": result}) + "\\n")
+    sys.stdout.flush()
+
+
+for line in sys.stdin:
+    request = json.loads(line)
+    if "id" not in request:
+        continue
+    method = request.get("method")
+    if method == "initialize":
+        respond(request["id"], {
+            "protocolVersion": "2025-11-25",
+            "capabilities": {"tools": {}},
+            "serverInfo": {"name": "destructive-fixture", "version": "1.0.0"},
+        })
+    elif method == "tools/list":
+        respond(request["id"], {"tools": TOOLS})
+    elif method == "tools/call":
+        name = request["params"]["name"]
+        connection = sqlite3.connect(DATABASE)
+        if name == "purge_events":
+            connection.execute("delete from events")
+            connection.commit()
+        connection.close()
+        respond(request["id"], {
+            "content": [{"type": "text", "text": "done"}],
+            "isError": False,
+        })
+'''
 
 READ_TOOL = {
     "name": "read_file",
@@ -126,6 +336,93 @@ class SynthesizeArgumentTests(unittest.TestCase):
         self.assertTrue(file_argument["path"].endswith(".txt"))
         self.assertEqual(directory_argument["path"], "/sandbox")
 
+    def test_identifier_names_containing_file_are_not_paths(self) -> None:
+        schema = {
+            "type": "object",
+            "properties": {
+                "profile_id": {"type": "string"},
+                "target_language": {"type": "string"},
+                "source_language": {"type": "string"},
+                "target_audience": {"type": "string"},
+            },
+            "required": ["profile_id", "target_language", "source_language", "target_audience"],
+        }
+        arguments = synthesize_arguments(
+            schema, sandbox="/sandbox", tool_name="translate_document"
+        )
+        for name in ("profile_id", "target_language", "source_language", "target_audience"):
+            self.assertEqual(arguments[name], PROBE_STRING)
+
+    def test_search_tools_receive_the_seeded_directory(self) -> None:
+        schema = {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Directory to search for files",
+                }
+            },
+            "required": ["path"],
+        }
+        arguments = synthesize_arguments(
+            schema, sandbox="/sandbox", tool_name="search_files"
+        )
+        self.assertEqual(arguments["path"], "/sandbox")
+        self.assertTrue(
+            _wants_directory("path", "Directory to search for files", "search_files")
+        )
+        self.assertTrue(_wants_directory("path", "Directory to list", "list_directory"))
+
+    def test_file_tools_still_receive_a_file(self) -> None:
+        # Filesystem servers repeat "allowed directories" in file descriptions;
+        # that boilerplate must not turn a file argument into a directory.
+        self.assertFalse(
+            _wants_directory(
+                "path",
+                "Read the complete contents of a file. Only works within allowed "
+                "directories.",
+                "read_text_file",
+            )
+        )
+        self.assertFalse(
+            _wants_directory("path", "Write content to a file", "write_file")
+        )
+
+    def test_explicit_directory_names_always_win(self) -> None:
+        for name in ("dir", "directory", "folder_path", "root_path", "dir_path"):
+            self.assertTrue(_wants_directory(name, "A file", "write_file"), name)
+
+    def test_short_role_words_do_not_create_destinations(self) -> None:
+        for name in ("token_file", "timeout_path", "total", "timestamp_path"):
+            self.assertEqual(_role(name), "read", name)
+
+    def test_explicit_destination_words_are_write_roles(self) -> None:
+        for name in ("output_path", "destination", "dest_file", "target", "to"):
+            self.assertEqual(_role(name), "write", name)
+
+    def test_path_argument_with_an_incidental_role_substring_reads_the_seed(self) -> None:
+        schema = {
+            "type": "object",
+            "properties": {"token_file": {"type": "string"}},
+            "required": ["token_file"],
+        }
+        arguments = synthesize_arguments(
+            schema, sandbox="/sandbox", tool_name="inspect_token"
+        )
+        self.assertEqual(arguments["token_file"], f"/sandbox/{PROBE_FILE_NAME}")
+        self.assertNotEqual(arguments["token_file"], f"/sandbox/{PROBE_COPY_NAME}")
+
+    def test_camel_case_path_names_still_resolve_into_the_sandbox(self) -> None:
+        schema = {
+            "type": "object",
+            "properties": {"filePath": {"type": "string"}},
+            "required": ["filePath"],
+        }
+        arguments = synthesize_arguments(
+            schema, sandbox="/sandbox", tool_name="read_note"
+        )
+        self.assertTrue(arguments["filePath"].startswith("/sandbox"))
+
     def test_quoted_identifier_example_is_reused(self) -> None:
         schema = {
             "type": "object",
@@ -147,6 +444,63 @@ class SynthesizeArgumentTests(unittest.TestCase):
 
     def test_missing_schema_yields_no_arguments(self) -> None:
         self.assertEqual(synthesize_arguments(None), {})
+
+    def test_url_arguments_are_synthesized_as_urls(self) -> None:
+        schema = {
+            "type": "object",
+            "properties": {
+                "url": {"type": "string", "description": "Page to fetch"},
+                "resource": {"type": "string", "format": "uri"},
+                "file_url": {"type": "string", "description": "Link to the file"},
+            },
+            "required": ["url", "resource", "file_url"],
+        }
+        arguments = synthesize_arguments(
+            schema, sandbox="/sandbox", tool_name="fetch_content"
+        )
+        for name in ("url", "resource", "file_url"):
+            self.assertEqual(arguments[name], PROBE_URL)
+
+    def test_url_example_from_the_description_is_reused(self) -> None:
+        schema = {
+            "type": "object",
+            "properties": {
+                "page": {
+                    "type": "string",
+                    "description": "Target page, for example https://example.org/docs.",
+                }
+            },
+            "required": ["page"],
+        }
+        arguments = synthesize_arguments(schema, tool_name="fetch")
+        self.assertEqual(arguments["page"], "https://example.org/docs")
+
+    def test_sql_arguments_get_a_valid_select(self) -> None:
+        schema = {
+            "type": "object",
+            "properties": {
+                "sql": {"type": "string", "description": "Query to run"},
+                "query": {
+                    "type": "string",
+                    "description": "Execute a read-only SQL query",
+                },
+            },
+            "required": ["sql", "query"],
+        }
+        arguments = synthesize_arguments(schema, tool_name="read_query")
+        self.assertEqual(arguments["sql"], PROBE_SQL)
+        self.assertEqual(arguments["query"], PROBE_SQL)
+
+    def test_search_query_is_not_treated_as_sql(self) -> None:
+        schema = {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Search the public web"}
+            },
+            "required": ["query"],
+        }
+        arguments = synthesize_arguments(schema, tool_name="search")
+        self.assertEqual(arguments["query"], PROBE_STRING)
 
     def test_source_and_destination_get_different_paths(self) -> None:
         schema = {
@@ -241,6 +595,374 @@ class BuildManifestTests(unittest.TestCase):
         )
         self.assertFalse(manifest["generated"]["probeFixtures"])
         self.assertEqual(len(manifest["cases"]), 1)
+
+    def test_sqlite_query_replaces_the_sandbox_observer(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            database = Path(directory) / "state.db"
+            connection = sqlite3.connect(database)
+            connection.execute("create table events(id integer primary key)")
+            connection.commit()
+            connection.close()
+            manifest = build_manifest(
+                [READ_TOOL],
+                command=["server"],
+                observer_root=directory,
+                sqlite_queries=[(str(database), "select id from events")],
+            )
+            self.assertEqual(
+                [observer["kind"] for observer in manifest["observers"]],
+                ["sqlite-query"],
+            )
+            observer = manifest["observers"][0]
+            self.assertTrue(Path(observer["database"]).is_absolute())
+            self.assertEqual(observer["query"], "select id from events")
+            with tempfile.TemporaryDirectory() as destination:
+                path = Path(destination) / "manifest.json"
+                write_manifest(manifest, path)
+                loaded, _ = load_manifest(path)
+            self.assertEqual(loaded["observers"][0]["id"], "sqlite-state")
+
+    def test_sandbox_observer_can_be_kept_alongside_sqlite(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            database = Path(directory) / "state.db"
+            connection = sqlite3.connect(database)
+            connection.commit()
+            connection.close()
+            manifest = build_manifest(
+                [READ_TOOL],
+                command=["server"],
+                observer_root=directory,
+                sqlite_queries=[(str(database), "select 1")],
+                include_sandbox_observer=True,
+            )
+            self.assertEqual(
+                [observer["kind"] for observer in manifest["observers"]],
+                ["filesystem", "sqlite-query"],
+            )
+
+    def test_missing_database_fails_closed(self) -> None:
+        with self.assertRaises(ScanError):
+            build_manifest(
+                [READ_TOOL],
+                command=["server"],
+                observer_root="/sandbox",
+                sqlite_queries=[("/nonexistent/state.db", "select 1")],
+            )
+
+    def test_sqlite_observer_ids_stay_unique(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            databases = []
+            for name in ("first", "second"):
+                folder = Path(directory) / name
+                folder.mkdir()
+                database = folder / "state.db"
+                connection = sqlite3.connect(database)
+                connection.commit()
+                connection.close()
+                databases.append(database)
+            manifest = build_manifest(
+                [READ_TOOL],
+                command=["server"],
+                observer_root=directory,
+                sqlite_queries=[(str(database), "select 1") for database in databases],
+            )
+            ids = [observer["id"] for observer in manifest["observers"]]
+            self.assertEqual(len(ids), len(set(ids)))
+
+    def test_mcp_check_flags_a_read_only_tool_that_inserts_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            database = root / "state.db"
+            connection = sqlite3.connect(database)
+            connection.execute("create table events(id integer primary key, message text)")
+            connection.commit()
+            connection.close()
+            server = root / "server.py"
+            server.write_text(SQLITE_FIXTURE_SERVER, encoding="utf-8")
+            report_path = root / "report.json"
+            exit_code = cli_main(
+                [
+                    "mcp-check",
+                    "--sandbox",
+                    str(root / "sandbox"),
+                    "--out",
+                    str(report_path),
+                    "--sqlite-query",
+                    f"{database}=select id, message from events order by id",
+                    "--",
+                    sys.executable,
+                    str(server),
+                    str(database),
+                ]
+            )
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+            self.assertEqual([item["kind"] for item in report["observers"]], ["sqlite-query"])
+            self.assertEqual(report["verdict"], "fail")
+            codes = [
+                violation["code"]
+                for case in report["cases"]
+                for violation in case["violations"]
+            ]
+            self.assertIn("READ_ONLY_HINT_MISMATCH", codes)
+            self.assertEqual(exit_code, 2)
+
+    def test_contracts_override_annotations_and_are_marked_user_supplied(self) -> None:
+        manifest = build_manifest(
+            [READ_TOOL],
+            command=["server"],
+            observer_root="/sandbox",
+            contracts={"read_file": {"readOnlyHint": False}},
+        )
+        self.assertEqual(manifest["cases"][0]["contract"]["readOnlyHint"], False)
+        self.assertEqual(
+            manifest["generated"]["userContracts"]["tools"],
+            {"read_file": {"readOnlyHint": False}},
+        )
+
+    def test_contract_all_applies_and_per_tool_overrides_it(self) -> None:
+        manifest = build_manifest(
+            [READ_TOOL, LIST_TOOL],
+            command=["server"],
+            observer_root="/sandbox",
+            contract_all={"readOnlyHint": False, "openWorldHint": False},
+            contracts={"list_directory": {"readOnlyHint": True}},
+        )
+        read_case, list_case = manifest["cases"]
+        self.assertEqual(read_case["contract"]["readOnlyHint"], False)
+        self.assertEqual(read_case["contract"]["openWorldHint"], False)
+        self.assertEqual(list_case["contract"]["readOnlyHint"], True)
+
+    def test_unknown_contract_hint_is_rejected_with_the_valid_names(self) -> None:
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            with self.assertRaises(SystemExit) as refused:
+                cli_main(
+                    [
+                        "mcp-check",
+                        "--contract",
+                        "read_file=readOnly:true",
+                        "--",
+                        sys.executable,
+                        "-c",
+                        "pass",
+                    ]
+                )
+        self.assertEqual(refused.exception.code, 2)
+        message = stderr.getvalue()
+        self.assertIn("readOnlyHint", message)
+        self.assertIn("openWorldHint", message)
+
+    def test_mcp_check_contract_verifies_a_declaration_the_server_did_not_make(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            database = root / "state.db"
+            connection = sqlite3.connect(database)
+            connection.execute("create table events(id integer primary key, message text)")
+            connection.commit()
+            connection.close()
+            server = root / "server.py"
+            server.write_text(SQLITE_FIXTURE_SERVER, encoding="utf-8")
+            report_path = root / "report.json"
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(
+                io.StringIO()
+            ):
+                exit_code = cli_main(
+                    [
+                        "mcp-check",
+                        "--out",
+                        str(report_path),
+                        "--sqlite-query",
+                        f"{database}=select id, message from events order by id",
+                        "--contract",
+                        "log_event=readOnlyHint:true",
+                        "--",
+                        sys.executable,
+                        str(server),
+                        str(database),
+                    ]
+                )
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+            case = next(item for item in report["cases"] if item["tool"] == "log_event")
+            self.assertEqual(
+                case["declarations"]["readOnlyHint"]["source"], "manifest-contract"
+            )
+            self.assertIn(
+                "READ_ONLY_HINT_MISMATCH",
+                [item["code"] for item in case["violations"]],
+            )
+            self.assertEqual(exit_code, 2)
+
+    def test_init_writes_a_loadable_scaffold_with_todos(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            server = root / "server.py"
+            server.write_text(SCAFFOLD_SERVER, encoding="utf-8")
+            out = root / "safesink.mcp.json"
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(io.StringIO()):
+                exit_code = cli_main(
+                    [
+                        "init",
+                        "--server",
+                        sys.executable,
+                        str(server),
+                        str(root / "calls.log"),
+                        "--observer-root",
+                        str(root / "sandbox"),
+                        "--out",
+                        str(out),
+                    ]
+                )
+            self.assertEqual(exit_code, 0)
+            manifest = json.loads(out.read_text(encoding="utf-8"))
+            loaded, _ = load_manifest(out)
+            self.assertNotIn("generatedArguments", loaded["cases"][0])
+            by_tool = {case["tool"]: case for case in loaded["cases"]}
+            self.assertEqual(by_tool["read_note"]["contract"], {"readOnlyHint": True})
+            self.assertEqual(by_tool["translate_note"]["contract"], {})
+            self.assertEqual(loaded["generated"]["by"], "safesink init")
+            self.assertEqual(
+                [item["tool"] for item in loaded["generated"]["todo"]],
+                ["translate_note"],
+            )
+            self.assertEqual(manifest["generated"]["todo"][0]["tool"], "translate_note")
+
+    def test_dry_run_prints_the_plan_and_calls_nothing(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            calls = root / "calls.log"
+            server = root / "server.py"
+            server.write_text(DRY_RUN_SERVER, encoding="utf-8")
+            manifest_path = root / "manifest.json"
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(
+                io.StringIO()
+            ):
+                exit_code = cli_main(
+                    [
+                        "mcp-check",
+                        "--sandbox",
+                        str(root / "sandbox"),
+                        "--out",
+                        str(manifest_path),
+                        "--dry-run",
+                        "--",
+                        sys.executable,
+                        str(server),
+                        str(calls),
+                    ]
+                )
+            self.assertEqual(exit_code, 0)
+            self.assertFalse(calls.exists())
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            plan = manifest["generated"]["plan"]
+            self.assertEqual([item["tool"] for item in plan], ["read_note"])
+            self.assertTrue(plan[0]["arguments"]["path"].endswith(".txt"))
+            self.assertEqual(plan[0]["observers"], ["sandbox"])
+            loaded, _ = load_manifest(manifest_path)
+            self.assertEqual(loaded["cases"][0]["tool"], "read_note")
+
+    def test_dry_run_does_not_require_the_sqlite_database_to_exist(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            server = root / "server.py"
+            server.write_text(DRY_RUN_SERVER, encoding="utf-8")
+            manifest_path = root / "manifest.json"
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(
+                io.StringIO()
+            ):
+                exit_code = cli_main(
+                    [
+                        "mcp-check",
+                        "--out",
+                        str(manifest_path),
+                        "--sqlite-query",
+                        f"{root / 'missing.db'}=select 1",
+                        "--dry-run",
+                        "--",
+                        sys.executable,
+                        str(server),
+                        str(root / "calls.log"),
+                    ]
+                )
+            self.assertEqual(exit_code, 0)
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            self.assertEqual(
+                [observer["kind"] for observer in manifest["observers"]],
+                ["sqlite-query"],
+            )
+
+    def test_include_destructive_refuses_a_real_database_without_a_sandbox(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            database = root / "orders.db"
+            connection = sqlite3.connect(database)
+            connection.execute("create table events(id integer primary key)")
+            connection.execute("insert into events default values")
+            connection.commit()
+            connection.close()
+            server = root / "server.py"
+            server.write_text(DESTRUCTIVE_DATABASE_SERVER, encoding="utf-8")
+            report_path = root / "report.json"
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                with self.assertRaises(SystemExit) as refused:
+                    cli_main(
+                        [
+                            "mcp-check",
+                            "--out",
+                            str(report_path),
+                            "--sqlite-query",
+                            f"{database}=select id from events",
+                            "--include-destructive",
+                            "--",
+                            sys.executable,
+                            str(server),
+                            str(database),
+                        ]
+                    )
+            self.assertEqual(refused.exception.code, 2)
+            message = stderr.getvalue()
+            self.assertIn("purge_events", message)
+            self.assertIn(str(database), message)
+            self.assertIn("--allow-unobserved-mutations", message)
+            self.assertFalse(report_path.exists())
+            connection = sqlite3.connect(database)
+            try:
+                remaining = connection.execute("select count(*) from events").fetchone()[0]
+            finally:
+                connection.close()
+            self.assertEqual(remaining, 1)
+
+    def test_unobserved_mutations_can_be_allowed_explicitly(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            database = root / "orders.db"
+            connection = sqlite3.connect(database)
+            connection.execute("create table events(id integer primary key)")
+            connection.execute("insert into events default values")
+            connection.commit()
+            connection.close()
+            server = root / "server.py"
+            server.write_text(DESTRUCTIVE_DATABASE_SERVER, encoding="utf-8")
+            report_path = root / "report.json"
+            exit_code = cli_main(
+                [
+                    "mcp-check",
+                    "--out",
+                    str(report_path),
+                    "--sqlite-query",
+                    f"{database}=select id from events",
+                    "--include-destructive",
+                    "--allow-unobserved-mutations",
+                    "--",
+                    sys.executable,
+                    str(server),
+                    str(database),
+                ]
+            )
+            self.assertEqual(exit_code, 0)
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+            self.assertIn("purge_events-destructive", [c["id"] for c in report["cases"]])
 
     def test_manifest_is_written_deterministically(self) -> None:
         manifest = build_manifest(

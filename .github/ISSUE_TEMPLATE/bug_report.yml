@@ -1,0 +1,81 @@
+name: Bug report
+description: SafeSink crashed, gave the wrong verdict, or the report is malformed
+title: "bug: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. A SafeSink report is structured, so pasting the
+        relevant part is usually faster than describing it.
+
+        **Redact before pasting.** Reports can contain tool arguments, file
+        paths, query rows and a `server.stderrExcerpt`. Never paste a report
+        from an observer over real data, and remove DSNs, tokens and hostnames.
+  - type: input
+    id: version
+    attributes:
+      label: SafeSink version
+      description: Output of `safesink --version`
+      placeholder: "0.5.0"
+    validations:
+      required: true
+  - type: input
+    id: python
+    attributes:
+      label: Python version and OS
+      placeholder: "3.12.4 on Ubuntu 24.04"
+    validations:
+      required: true
+  - type: textarea
+    id: command
+    attributes:
+      label: Server command and how you ran SafeSink
+      description: The manifest's `server.command`, plus the exact SafeSink command line.
+      render: shell
+      placeholder: |
+        safesink mcp-verify manifest.json --out out/report.json
+        # server.command: ["npx", "-y", "@modelcontextprotocol/server-filesystem", "./sandbox"]
+    validations:
+      required: true
+  - type: dropdown
+    id: verdict
+    attributes:
+      label: Reported verdict
+      options:
+        - pass (but should not have)
+        - fail (but should not have)
+        - inconclusive
+        - crash or non-zero exit with no report
+    validations:
+      required: true
+  - type: textarea
+    id: codes
+    attributes:
+      label: Finding codes
+      description: The `cases[].violations[].code` values from the JSON report, one per line.
+      render: text
+      placeholder: |
+        UNDECLARED_WRITE
+        SENSITIVE_PATH_TOUCHED
+  - type: textarea
+    id: report
+    attributes:
+      label: Relevant report excerpt
+      description: The affected `cases[]` entries, or `fatalError` if there is no report.
+      render: json
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected instead
+    validations:
+      required: true
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: Checklist
+      options:
+        - label: I removed secrets, real data and personal paths from what I pasted.
+          required: true
+        - label: I searched open issues for the same problem.
+          required: true

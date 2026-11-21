@@ -6,8 +6,13 @@ branding:
   color: blue
 inputs:
   manifest:
-    description: Path to an effectfence.mcp.v1 manifest (kept for compat, also safesink.mcp.v1)
-    required: true
+    description: Path to a safesink.mcp.v1 (or legacy effectfence.mcp.v1) manifest
+    required: false
+    default: safesink.mcp.json
+  command:
+    description: "auto (verify when the manifest has cases, otherwise check), check, verify, or lint"
+    required: false
+    default: auto
   out:
     description: JSON report path
     required: false
@@ -20,25 +25,161 @@ inputs:
     description: SARIF report path
     required: false
     default: safesink-mcp.sarif
+  markdown:
+    description: Markdown report path, used for the sticky comment
+    required: false
+    default: safesink-mcp-report.md
+  sandbox:
+    description: Sandbox directory observed by --sqlite-query and the filesystem observer
+    required: false
+    default: .safesink-sandbox
+  min-coverage:
+    description: Required fraction of advertised tools covered by cases
+    required: false
+    default: "0"
+  min-score:
+    description: Minimum trust score; the run fails below it
+    required: false
+    default: ""
+  baseline:
+    description: Previous report to compare against
+    required: false
+    default: ""
+  new-only:
+    description: Fail only on regressions against the baseline (true/false)
+    required: false
+    default: "false"
+  comment:
+    description: Post or update a sticky pull request comment
+    required: false
+    default: "true"
+  artifact-name:
+    description: Name for the uploaded evidence artifact
+    required: false
+    default: safesink-evidence
 outputs:
   report:
     description: JSON report path
-    value: ${{ inputs.out }}
+    value: ${{ steps.run.outputs.report }}
+  markdown:
+    description: Markdown report path
+    value: ${{ steps.run.outputs.markdown }}
+  verdict:
+    description: pass, inconclusive or fail
+    value: ${{ steps.run.outputs.verdict }}
+  score:
+    description: Trust score out of 100
+    value: ${{ steps.run.outputs.score }}
+  findings:
+    description: Number of violations across cases
+    value: ${{ steps.run.outputs.findings }}
 runs:
   using: composite
   steps:
     - name: Install SafeSink
       shell: bash
       run: python -m pip install "${{ github.action_path }}"
-    - name: Verify MCP conformance
+    - name: Select command
+      id: plan
       shell: bash
       env:
+        SAFESINK_COMMAND: ${{ inputs.command }}
+        SAFESINK_MANIFEST: ${{ inputs.manifest }}
+      run: |
+        set -euo pipefail
+        command="$SAFESINK_COMMAND"
+        if [ "$command" = "auto" ]; then
+          if [ ! -f "$SAFESINK_MANIFEST" ]; then
+            echo "::error::no manifest at $SAFESINK_MANIFEST; run 'safesink init' or point the manifest input at one"
+            exit 2
+          fi
+          command="check"
+          if python -c 'import json,sys; sys.exit(0 if json.load(open(sys.argv[1])).get("cases") else 1)' "$SAFESINK_MANIFEST"; then
+            command="verify"
+          fi
+        fi
+        echo "command=$command" >> "$GITHUB_OUTPUT"
+    - name: Verify MCP conformance
+      id: run
+      shell: bash
+      env:
+        SAFESINK_COMMAND: ${{ steps.plan.outputs.command }}
         SAFESINK_MANIFEST: ${{ inputs.manifest }}
         SAFESINK_OUT: ${{ inputs.out }}
         SAFESINK_JUNIT: ${{ inputs.junit }}
         SAFESINK_SARIF: ${{ inputs.sarif }}
-      run: >-
-        python -m safesink mcp-verify "$SAFESINK_MANIFEST"
-        --out "$SAFESINK_OUT"
-        --junit "$SAFESINK_JUNIT"
-        --sarif "$SAFESINK_SARIF"
+        SAFESINK_MARKDOWN: ${{ inputs.markdown }}
+        SAFESINK_SANDBOX: ${{ inputs.sandbox }}
+        SAFESINK_MIN_COVERAGE: ${{ inputs.min-coverage }}
+        SAFESINK_MIN_SCORE: ${{ inputs.min-score }}
+        SAFESINK_BASELINE: ${{ inputs.baseline }}
+        SAFESINK_NEW_ONLY: ${{ inputs.new-only }}
+      run: |
+        set -uo pipefail
+        args=()
+        case "$SAFESINK_COMMAND" in
+          check)
+            args+=(mcp-check --out "$SAFESINK_OUT" --junit "$SAFESINK_JUNIT" --sarif "$SAFESINK_SARIF")
+            args+=(--sandbox "$SAFESINK_SANDBOX" --min-coverage "$SAFESINK_MIN_COVERAGE")
+            ;;
+          verify)
+            args+=(mcp-verify "$SAFESINK_MANIFEST" --out "$SAFESINK_OUT" --junit "$SAFESINK_JUNIT" --sarif "$SAFESINK_SARIF")
+            args+=(--markdown "$SAFESINK_MARKDOWN" --github-summary)
+            [ -n "$SAFESINK_MIN_SCORE" ] && args+=(--min-score "$SAFESINK_MIN_SCORE")
+            [ -n "$SAFESINK_BASELINE" ] && args+=(--baseline "$SAFESINK_BASELINE")
+            [ "$SAFESINK_NEW_ONLY" = "true" ] && args+=(--new-only)
+            ;;
+          lint)
+            args+=(lint --manifest "$SAFESINK_MANIFEST")
+            ;;
+          *)
+            echo "::error::unknown command '$SAFESINK_COMMAND'"
+            exit 2
+            ;;
+        esac
+        status=0
+        python -m safesink "${args[@]}" || status=$?
+        echo "exit-code=$status" >> "$GITHUB_OUTPUT"
+        python - "$SAFESINK_OUT" "$SAFESINK_MARKDOWN" >> "$GITHUB_OUTPUT" <<'PY'
+        import json, os, sys
+        report_path, markdown_path = sys.argv[1], sys.argv[2]
+        values = {"report": report_path, "markdown": markdown_path, "verdict": "unknown", "score": "", "findings": ""}
+        try:
+            report = json.load(open(report_path, encoding="utf-8"))
+        except (OSError, ValueError):
+            report = {}
+        values["verdict"] = report.get("verdict", "unknown")
+        values["score"] = (report.get("score") or {}).get("value", "")
+        values["findings"] = sum(len(case.get("violations", [])) for case in report.get("cases", []))
+        for key, value in values.items():
+            print(f"{key}={value}")
+        PY
+        exit "$status"
+    - name: Sticky pull request comment
+      if: ${{ always() && inputs.comment == 'true' && github.event_name == 'pull_request' }}
+      uses: actions/github-script@v7
+      env:
+        SAFESINK_REPORT: ${{ inputs.out }}
+        SAFESINK_MARKDOWN: ${{ inputs.markdown }}
+        SAFESINK_VERDICT: ${{ steps.run.outputs.verdict }}
+      with:
+        script: |
+          const fs = require('fs');
+          const marker = '<!-- safesink-report -->';
+          const path = process.env.SAFESINK_MARKDOWN;
+          let body;
+          try {
+            body = fs.readFileSync(path, 'utf8');
+          } catch (error) {
+            body = `SafeSink could not produce a Markdown report (verdict: ${process.env.SAFESINK_VERDICT}).\n\nSee the workflow log and the \`${process.env.SAFESINK_REPORT}\` artifact.`;
+          }
+          body = `${marker}\n${body}`;
+          const {owner, repo} = context.repo;
+          const issue_number = context.payload.pull_request.number;
+          const comments = await github.paginate(github.rest.issues.listComments, {owner, repo, issue_number, per_page: 100});
+          const existing = comments.find((comment) => comment.body && comment.body.includes(marker));
+          if (existing) {
+            await github.rest.issues.updateComment({owner, repo, comment_id: existing.id, body});
+          } else {
+            await github.rest.issues.createComment({owner, repo, issue_number, body});
+          }

@@ -26,6 +26,20 @@ verifies, and writes the report. Pass `--manifest-out` to keep the generated
 manifest, `--include-destructive` to call destructive tools against a disposable
 sandbox, and `--env KEY=VALUE` (repeatable) for servers that need configuration.
 
+With `--sqlite-query DATABASE=SQL` the observed boundary is the rows that query
+returns rather than the sandbox file hash; repeat the flag for several
+observers, and add `--sandbox-observer` to watch both. The database must already
+exist and be seeded before the run, because a scan does not create your schema.
+Observer ids come from the file name (`state.db` becomes `sqlite-state`), and the
+manifest stores an absolute database path so it survives being written into a
+temporary sandbox.
+
+Because that database is real user data, `--include-destructive` is refused when
+`--sqlite-query` replaces the sandbox observer: mutating it would destroy what
+the run is supposed to measure. The error names every database that would be
+touched. Pass `--allow-unobserved-mutations` to accept that, or copy the database
+and point the server at the copy.
+
 With a hand-written manifest:
 
 ```bash
@@ -133,6 +147,14 @@ the harness rather than a finding about the server. A rejection in a
 hand-written case is still `TOOL_ERROR_EXPECTATION_MISMATCH`. Triage generated
 cases before reporting them.
 
+String arguments are synthesized from the property itself: a URL-shaped name
+(`url`, `uri`, `href`, `endpoint`, `webhook`) or `format: uri` gets a real URL,
+reusing a URL the description gives as an example; an argument that names SQL
+(`sql`, `statement`, or a description mentioning SQL, tables, rows, columns, a
+database or a schema) gets `select 1 as probe`, which parses on SQLite,
+PostgreSQL and MySQL instead of failing on a syntax error. A plain `query` on a
+search tool still gets an opaque probe string.
+
 ### Ambiguous result retries
 
 Set `ambiguousResultFault` on a case to test the failure window where the
@@ -159,8 +181,10 @@ evidence is explicitly inconclusive and can never produce a passing verdict.
 
 - `filesystem`: hashes regular files, records symlinks without following them,
   and enforces file-count and byte limits.
-- `sqlite-query`: opens the database read-only and rejects mutating SQL through
-  SQLite's authorizer API.
+- `sqlite-query`: opens the database read-only, rejects mutating SQL through
+  SQLite's authorizer API, and compares the rows the query returns as a
+  multiset. A removed row is reported as destructive; an insert, update or
+  delete outside the result set is invisible to this observer.
 - `http-json`: performs an allowlisted GET, blocks redirects, caps response size,
   and compares canonical JSON state.
 
@@ -189,7 +213,7 @@ This repository includes a composite GitHub Action. A consuming repository can
 pin a released commit or tag:
 
 ```yaml
-- uses: virajsabhaya23/effectfence@main
+- uses: virajsabhaya23/safesink@main
   with:
     manifest: safesink.mcp.json
     out: out/safesink/report.json
@@ -200,11 +224,198 @@ pin a released commit or tag:
 Pin a full commit SHA in high-assurance environments. Preserve the JSON report
 as a CI artifact and use the process exit code as the merge gate.
 
+## Adopting the gate on an existing server
+
+A first scan of a large server finds everything at once, so the only realistic CI
+policy would be to ignore the verdict. Take a baseline instead:
+
+```bash
+safesink mcp-verify safesink.mcp.json --out baseline.json          # record today
+safesink mcp-verify safesink.mcp.json \
+  --baseline baseline.json --new-only --out report.json            # gate tomorrow
+```
+
+With `--new-only`, a violation fails the run only when its `(caseId, code)` pair
+is absent from the baseline. The key is the case and the finding code, not the
+message, so wording changes and a declaration that moves from an annotation to a
+manifest contract do not read as regressions.
+
+Nothing is hidden. `report.baseline` lists every suppression with its case and
+code, the regressions, the findings that disappeared (`fixed`), a
+`BASELINE_REGRESSION` / `BASELINE_FIXED` summary, the baseline path and its
+SHA-256, and the JUnit report carries `baselineSuppressedCount` plus one
+`baselineSuppressed` property per entry. A new finding still fails the run, and a
+baseline that was merely inconclusive cannot hide a violation the new run found:
+that violation is new.
+
+## PostgreSQL and MySQL
+
+Production data is not usually a local SQLite file. Point an observer at the
+rows a query returns:
+
+```bash
+safesink mcp-check \
+  --pgsql-query ORDERS_DSN="select id, status from orders order by id" \
+  -- npx -y your-postgres-mcp
+```
+
+The left side is the name of the environment variable holding the DSN, not the
+DSN itself: a connection string carries a password, so it must never appear in a
+manifest or a report. `--mysql-query` works the same way with PyMySQL.
+
+Each snapshot opens a read-only transaction (`BEGIN READ ONLY` for PostgreSQL,
+`SET SESSION TRANSACTION READ ONLY` for MySQL) with a statement timeout, reads the
+rows, and rolls back. The diff is the same row multiset used by SQLite: a removed
+row is destructive, an insert is a change, and anything the query does not select
+is invisible. Both drivers are optional - install `safesink[postgres]` or
+`safesink[mysql]`; a missing driver is reported as such rather than silently
+skipping the boundary.
+
+## Remote servers over streamable HTTP
+
+Not every server is a local command. Point `mcp-check` at a URL instead of a
+stdio command:
+
+```bash
+safesink mcp-check \
+  --url https://mcp.example.com/mcp \
+  --allow-host mcp.example.com \
+  --header-env Authorization=MCP_TOKEN \
+  --sandbox ./sandbox --out out/report.json
+```
+
+In a manifest, set `server.transport: "streamable-http"`, `server.url`,
+`server.headersFromEnv` and `server.allowedHosts`. The transport performs the
+required `Accept: application/json, text/event-stream` handshake, keeps the
+`Mcp-Session-Id` the server issues, parses either a JSON body or SSE frames, and
+reports a 401 as a missing token rather than as a protocol failure.
+
+Secrets never enter a manifest or a report: `headersFromEnv` maps a header name to
+an environment variable and the value stays in the environment. The host must be
+in `allowedHosts` (loopback by default), redirects are refused, and response size
+is bounded. The verifier uses the same client surface either way, so cases,
+observers, scores and reports are identical.
+
+## Showing the result in a pull request
+
+SARIF only surfaces with code scanning enabled, JUnit only in the checks tab,
+and JSON is an artifact nobody opens. `--markdown report.md` writes a reviewable
+summary: verdict banner, score, coverage, a findings table (tool, case, code,
+declaration, observed), an inconclusive table with reasons, the observed
+boundary, baseline and suppression counts, and the certificate digest.
+`--github-summary` appends the same Markdown to `GITHUB_STEP_SUMMARY`, so the
+reason for a red build is on the run page without downloading anything.
+
+## Isolating cases
+
+One server process runs every case by default. `setup` hooks reset external
+state, but not the server's memory: a cached connection, a held lock or an
+accumulated session changes what the next case observes, and the result is an
+unexplained delta. `--restart-per-case` (or `server.restartPerCase`) tears the
+process down after each case and starts a fresh one with a new `initialize`.
+`server.restarts` and `case.serverInstance` record which cases shared a process.
+
+`--case-order` (or `server.caseOrder`) controls execution order: `file` keeps the
+manifest order, `name` sorts by case id, and `manifest` follows the top-level
+`caseOrder` array, then anything it does not name. A reproducible order matters
+when bisecting a stateful server.
+
+## Accepted findings
+
+A baseline says "not fixed yet"; a suppression says "accepted, deliberately".
+Pass `--suppress safesink.suppressions.json` with entries of
+`{caseId | tool, code, reason, expires, owner?}`. A suppression is valid only
+if `reason` is non-empty and `expires` is an ISO date (`YYYY-MM-DD`); the loader
+rejects anything else before the server starts.
+
+- Valid entries silence exactly that finding and are listed in
+  `report.suppressions.applied` with their reason, owner and expiry.
+- An expired entry does not silence anything: the original violation stays and a
+  `SUPPRESSION_EXPIRED` finding is added, so acceptance cannot rot quietly.
+- An entry that matches no finding is reported under `report.suppressions.unmatched`
+  rather than ignored, so the file stays honest.
+- `--fail-on-suppressed` adds `SUPPRESSED_FINDINGS_NOT_ALLOWED` and fails the run,
+  for a policy where nothing may be accepted.
+
+## Trust score
+
+Every report carries `score: {value, version, formula, inputs}`. The score starts
+at 100 and is derived only from evidence, so a badge or a gate can consume one
+number without re-reading the cases. Score version `1` deducts:
+
+| Event | Points |
+| --- | --- |
+| `READ_ONLY_HINT_MISMATCH` or `IDEMPOTENT_HINT_MISMATCH` (a lie about the effect) | 25 each |
+| `NON_DESTRUCTIVE_HINT_MISMATCH` or `CLOSED_WORLD_HINT_MISMATCH` | 15 each |
+| `AMBIGUOUS_RESULT_DUPLICATE_ON_RETRY` | 20 each |
+| any other violation or policy violation | 10 each |
+| each case with inconclusive evidence | 10 |
+| coverage shortfall below `policy.minimumToolCoverage` | 20 x shortfall |
+| a fatal error | 25 |
+
+The result is floored at 0. A curated manifest that deliberately covers fewer
+tools than the server advertises is not penalised as long as it meets its own
+policy; "could not verify" always costs something, so an inconclusive run can
+never tie a clean pass. `score.version` changes whenever the weights change, so an
+old report stays interpretable.
+
+`--min-score N` on `mcp-check` or `mcp-verify` exits 2 when the score is below
+`N`, which turns an inconclusive run into a hard gate without inventing a finding.
+
+## Contracts for unannotated servers
+
+An unannotated tool is never called, because a pass would claim verification that
+did not happen. A contract supplies the policy instead: `--contract
+TOOL=hint:true|false,...` (repeatable) for one tool, `--contract-all
+hint:true|false` for every tool, with per-tool contracts overriding the blanket
+one. Only `readOnlyHint`, `destructiveHint`, `idempotentHint` and `openWorldHint`
+are accepted, and only as `true` or `false`; anything else is rejected before the
+server starts.
+
+The manifest records the supplied contracts under `generated.userContracts`, and
+the report marks those declarations with `source: "manifest-contract"`. That
+distinction is the point: a pass against a contract proves the tool matches the
+policy you chose, not that the server's own annotations are honest.
+
+## Reviewing the plan first
+
+`--dry-run` on `mcp-check` or `mcp-scan` keeps the read-only half of a scan (start
+the server, call `tools/list`, synthesize arguments) and drops the rest. No
+`tools/call` is made and no setup or cleanup hook runs, so no observer can see a
+change. The plan - tool, kind, synthesized arguments, observers and declarations -
+is printed and stored under `generated.plan` in the manifest written to `--out`,
+which is a normal manifest you can feed to `mcp-verify` afterwards. A dry run also
+skips the `--sqlite-query` existence check, because it never reads rows.
+
+## Bounding a run
+
+Per-call timeouts do not bound a whole scan: a 60-tool server that hangs on
+every call takes 60 x `requestTimeoutSeconds`. Pass `--timeout SECONDS` to
+`mcp-check` or `mcp-verify`, or set `policy.runTimeoutSeconds`, to cap the run.
+When the budget is spent no further call is issued, the cases that were not
+reached are reported with `RUN_BUDGET_EXHAUSTED`, `runBudget` records the limit
+and whether it was hit, and the verdict is `inconclusive` (exit 3) - never a
+finding, because nothing was contradicted.
+
+## Diagnosing a fatal error
+
+A run that cannot start the server, list its tools, or keep it alive records
+`fatalError` as `{message, phase, case}`. `phase` is `startup`, `tools/list` or
+`case`, and `case` names the case that was running, so a scan that dies on case
+31 does not read like one that never started.
+
+Server stderr is the usual explanation and is the usual place a credential
+leaks, so it is summarised as `server.stderr_present` by default. Pass
+`--capture-stderr` (or set `server.captureStderr` in the manifest) to add a
+bounded `server.stderrExcerpt`; it is truncated to 4 KB and values beside
+`token`, `secret`, `password`, `api_key`, `authorization` and `bearer` are
+replaced with `[redacted]` before it reaches the report.
+
 ## Evidence boundary
 
 The result is only as complete as the observer set. For example, a filesystem
-observer cannot detect an HTTP call, and snapshot comparison cannot prove an
-external read occurred. Add observers for every state boundary relevant to the
+observer cannot detect an HTTP call, a SQLite observer sees only the rows its
+query selects, and snapshot comparison cannot prove an external read occurred. Add observers for every state boundary relevant to the
 tool. A passing report means no mismatch was observed within that declared
 boundary; it is not proof that the process made no other system call.
 

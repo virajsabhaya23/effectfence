@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/virajsabhaya23/effectfence/schemas/mcp-manifest-v1.schema.json",
+  "$id": "https://github.com/virajsabhaya23/safesink/schemas/mcp-manifest-v1.schema.json",
   "title": "EffectFence MCP conformance manifest v1",
   "type": "object",
   "additionalProperties": false,
@@ -17,12 +17,12 @@
     "server": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "command"
-      ],
       "properties": {
         "transport": {
-          "const": "stdio"
+          "enum": [
+            "stdio",
+            "streamable-http"
+          ]
         },
         "command": {
           "$ref": "#/$defs/command"
@@ -54,8 +54,45 @@
         "maxListPages": {
           "type": "integer",
           "minimum": 1
+        },
+        "captureStderr": {
+          "type": "boolean"
+        },
+        "restartPerCase": {
+          "type": "boolean",
+          "description": "Restart the server between cases so no state carries over."
+        },
+        "caseOrder": {
+          "enum": [
+            "file",
+            "name",
+            "manifest"
+          ],
+          "description": "Case execution order: as written, alphabetical, or manifest.caseOrder."
+        },
+        "url": {
+          "type": "string",
+          "description": "Streamable-HTTP MCP endpoint."
+        },
+        "headersFromEnv": {
+          "$ref": "#/$defs/stringMap"
+        },
+        "allowedHosts": {
+          "$ref": "#/$defs/stringArray"
         }
-      }
+      },
+      "anyOf": [
+        {
+          "required": [
+            "command"
+          ]
+        },
+        {
+          "required": [
+            "url"
+          ]
+        }
+      ]
     },
     "observers": {
       "type": "array",
@@ -79,8 +116,20 @@
           "type": "number",
           "minimum": 0,
           "maximum": 1
+        },
+        "runTimeoutSeconds": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Run-level budget; cases not reached are reported as RUN_BUDGET_EXHAUSTED."
         }
       }
+    },
+    "caseOrder": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Explicit case order used when server.caseOrder is 'manifest'."
     }
   },
   "$defs": {
@@ -282,6 +331,92 @@
               "exclusiveMinimum": 0
             },
             "maxResponseBytes": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "world": {
+              "enum": [
+                "closed",
+                "open"
+              ]
+            },
+            "sensitive": {
+              "type": "boolean"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "kind",
+            "dsnFromEnv",
+            "query"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "kind": {
+              "const": "postgres-query"
+            },
+            "dsnFromEnv": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Name of the environment variable holding the DSN; never a literal DSN."
+            },
+            "query": {
+              "type": "string"
+            },
+            "parameters": {
+              "type": "array"
+            },
+            "statementTimeoutMs": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "world": {
+              "enum": [
+                "closed",
+                "open"
+              ]
+            },
+            "sensitive": {
+              "type": "boolean"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "kind",
+            "dsnFromEnv",
+            "query"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "kind": {
+              "const": "mysql-query"
+            },
+            "dsnFromEnv": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Name of the environment variable holding the DSN; never a literal DSN."
+            },
+            "query": {
+              "type": "string"
+            },
+            "parameters": {
+              "type": "array"
+            },
+            "statementTimeoutMs": {
               "type": "integer",
               "minimum": 1
             },
