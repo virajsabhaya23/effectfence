@@ -61,6 +61,19 @@ def verify_manifest(path: str | Path) -> dict[str, Any]:
         observers = _build_observers(manifest.get("observers", []), base)
     except ObserverError as error:
         raise ManifestError(str(error)) from error
+    # The report has to say which boundary was watched: a pass over rows says
+    # nothing about files, and vice versa.
+    observer_summary = [
+        {
+            "id": item["id"],
+            "kind": item["kind"],
+            "world": item.get(
+                "world", "open" if item["kind"] == "http-json" else "closed"
+            ),
+            "sensitive": bool(item.get("sensitive", True)),
+        }
+        for item in manifest.get("observers", [])
+    ]
     started = time.time()
     results: list[dict[str, Any]] = []
     fatal_error: str | None = None
@@ -166,15 +179,35 @@ def verify_manifest(path: str | Path) -> dict[str, Any]:
         },
         "policyViolations": policy_violations,
         "fatalError": fatal_error,
+        "observers": observer_summary,
         "cases": results,
-        "limitations": [
-            "Only configured observers define the observable side-effect boundary.",
-            "External reads cannot be inferred from state snapshots.",
-            "HTTP JSON observers detect state change but cannot classify deletion.",
-        ],
+        "limitations": _limitations(observer_summary),
     }
     report["certificateSha256"] = canonical_digest(report)
     return report
+
+
+def _limitations(observers: list[dict[str, Any]]) -> list[str]:
+    kinds = {observer["kind"] for observer in observers}
+    limitations = [
+        "Only configured observers define the observable side-effect boundary.",
+        "External reads cannot be inferred from state snapshots.",
+    ]
+    if "http-json" in kinds:
+        limitations.append(
+            "HTTP JSON observers detect state change but cannot classify deletion."
+        )
+    if "sqlite-query" in kinds:
+        limitations.append(
+            "A SQLite observer compares only the rows its query returns; writes "
+            "outside that result set are not observed."
+        )
+    if "filesystem" not in kinds:
+        limitations.append(
+            "No filesystem observer was configured, so file writes are outside "
+            "the observed boundary."
+        )
+    return limitations
 
 
 def _run_case(

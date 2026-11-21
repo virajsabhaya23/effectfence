@@ -34,6 +34,19 @@ def _parse_env(parser: argparse.ArgumentParser, pairs: list[str]) -> dict[str, s
     return environment
 
 
+def _parse_sqlite_queries(
+    parser: argparse.ArgumentParser, entries: list[str]
+) -> list[tuple[str, str]]:
+    queries: list[tuple[str, str]] = []
+    for entry in entries:
+        # Split on the first '=' only, so SQL containing '=' still works.
+        database, separator, query = entry.partition("=")
+        if not separator or not database.strip() or not query.strip():
+            _die(parser, f"--sqlite-query expects DATABASE=SQL, got {entry!r}")
+        queries.append((database.strip(), query.strip()))
+    return queries
+
+
 def _add_scan_options(parser: argparse.ArgumentParser, *, required_out: bool) -> None:
     parser.add_argument(
         "--observer-root", required=True, help="sandbox directory to observe"
@@ -75,6 +88,21 @@ def build_parser(prog: str = "safesink") -> argparse.ArgumentParser:
         default=[],
         metavar="KEY=VALUE",
         help="environment variable for the server (repeatable)",
+    )
+    check.add_argument(
+        "--sqlite-query",
+        action="append",
+        default=[],
+        metavar="DATABASE=SQL",
+        help=(
+            "observe the rows this query returns instead of the sandbox file hash "
+            "(repeatable; the database must already exist)"
+        ),
+    )
+    check.add_argument(
+        "--sandbox-observer",
+        action="store_true",
+        help="also hash the sandbox directory when --sqlite-query is used",
     )
     check.add_argument("--protocol-version", default="2025-11-25")
     check.add_argument("--startup-timeout", type=float, default=60.0)
@@ -165,6 +193,7 @@ def main(argv: list[str] | None = None, prog: str = "safesink") -> int:
         sandbox.mkdir(parents=True, exist_ok=True)
         manifest_path = Path(arguments.manifest_out or (sandbox / "manifest.json"))
         server_env = _parse_env(parser, arguments.env)
+        sqlite_queries = _parse_sqlite_queries(parser, arguments.sqlite_query)
         try:
             tools, server_info = list_server_tools(
                 arguments.command,
@@ -184,11 +213,19 @@ def main(argv: list[str] | None = None, prog: str = "safesink") -> int:
                 inherit_env=arguments.inherit_env,
                 env=server_env,
                 protocol_version=arguments.protocol_version,
+                sqlite_queries=sqlite_queries,
+                include_sandbox_observer=arguments.sandbox_observer,
             )
             write_manifest(manifest, manifest_path)
             report = verify_manifest(manifest_path)
-        except (ScanError, McpClientError, ManifestError) as error:
+        except ScanError as error:
+            _die(parser, str(error))
+            return 2
+        except McpClientError as error:
             _die(parser, str(error), hint="the server must speak MCP over stdio")
+            return 2
+        except ManifestError as error:
+            _die(parser, str(error))
             return 2
         finally:
             if temporary and not arguments.keep_sandbox:
@@ -206,6 +243,7 @@ def main(argv: list[str] | None = None, prog: str = "safesink") -> int:
                     "verdict": report["verdict"],
                     "cases": len(report["cases"]),
                     "toolCoverage": report["coverage"]["ratio"],
+                    "observers": [item["kind"] for item in report.get("observers", [])],
                     "inconclusive": sum(
                         1 for case in report["cases"] if case.get("inconclusive")
                     ),

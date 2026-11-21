@@ -26,6 +26,13 @@ PROBE_MEDIA_NAME = "safesink-probe.png"
 PROBE_COPY_NAME = "safesink-probe-copy.txt"
 PROBE_DIR_NAME = "safesink-probe-dir"
 PROBE_TEXT = "safesink probe fixture\n"
+# A reachable, stable document: URL arguments need a real URL, not a placeholder
+# string, or every network tool answers with an argument error.
+PROBE_URL = "https://example.com/"
+# Valid on SQLite, PostgreSQL and MySQL without knowing any schema. Database
+# tools that require a particular table still fail, but harmlessly and
+# observably, instead of on a syntax error.
+PROBE_SQL = "select 1 as probe"
 
 # Property names that should resolve to a sandbox path rather than a bare string.
 _PATH_HINTS = (
@@ -64,6 +71,23 @@ _READ_ROLE_HINTS = ("source", "src", "from", "input", "in", "origin")
 # example "Exact library ID (e.g. '/mongodb/docs')". Reusing that example is the
 # difference between a rejected call and a real observation.
 _EXAMPLE_PATTERN = re.compile(r"['\"](/[^'\"\s,]+)['\"]")
+_URL_EXAMPLE_PATTERN = re.compile(r"https?://[^\s'\"<>),;]+")
+# "for example https://..." is the description telling us what shape it wants.
+_URL_HINT_PATTERN = re.compile(
+    r"(?:e\.g\.|for example|example:)[^.]{0,40}?(https?://[^\s'\"<>),;]+)",
+    re.IGNORECASE,
+)
+
+# Property names that carry a URL rather than an opaque string.
+_URL_NAME_TOKENS = {"url", "uri", "href", "endpoint", "webhook"}
+_URL_FORMATS = {"uri", "url", "iri"}
+
+# "query" alone is a search box as often as it is SQL, so SQL detection needs a
+# database word as well.
+_SQL_NAME_TOKENS = {"sql", "statement"}
+_SQL_TEXT_PATTERN = re.compile(
+    r"\b(sql|select|table|column|rows?|database|schema)\b", re.IGNORECASE
+)
 
 
 class ScanError(ValueError):
@@ -153,6 +177,39 @@ def _description_example(description: str) -> str | None:
     return example if len(example) > 2 else None
 
 
+def _name_tokens(name: str) -> set[str]:
+    return set(re.findall(r"[a-z0-9]+", name.lower()))
+
+
+def _looks_like_url(name: str, schema: dict[str, Any]) -> bool:
+    if _name_tokens(name) & _URL_NAME_TOKENS:
+        return True
+    declared_format = schema.get("format")
+    if isinstance(declared_format, str) and declared_format.lower() in _URL_FORMATS:
+        return True
+    description = schema.get("description")
+    return isinstance(description, str) and _URL_HINT_PATTERN.search(description) is not None
+
+
+def _url_value(schema: dict[str, Any]) -> str:
+    description = schema.get("description")
+    if isinstance(description, str):
+        hinted = _URL_HINT_PATTERN.search(description)
+        match = _URL_EXAMPLE_PATTERN.search(description)
+        if hinted is not None:
+            return hinted.group(1).rstrip(".,;:")
+        if match is not None:
+            return match.group(0).rstrip(".,;:")
+    return PROBE_URL
+
+
+def _looks_like_sql(name: str, description: str, tool_name: str) -> bool:
+    if _name_tokens(name) & _SQL_NAME_TOKENS:
+        return True
+    text = f"{description} {tool_name}"
+    return _SQL_TEXT_PATTERN.search(text) is not None
+
+
 def _path_value(
     name: str,
     schema: dict[str, Any],
@@ -210,9 +267,16 @@ def _scalar_for(
     if declared == "object":
         return synthesize_arguments(schema, sandbox=sandbox, tool_name=tool_name)
 
-    if sandbox and _looks_like_path(name):
-        return _path_value(name, schema, sandbox, tool_name, role)
     description = schema.get("description") if isinstance(schema.get("description"), str) else ""
+    # URL detection runs first: a property named ``file_url`` is a URL, not a
+    # sandbox path, even though it contains a path hint.
+    is_url = _looks_like_url(name, schema)
+    if sandbox and _looks_like_path(name) and not is_url:
+        return _path_value(name, schema, sandbox, tool_name, role)
+    if is_url:
+        return _url_value(schema)
+    if _looks_like_sql(name, description, tool_name):
+        return PROBE_SQL
     example = _description_example(description)
     if example is not None:
         return example
@@ -278,6 +342,18 @@ def list_server_tools(
         return client.list_tools(), dict(client.server_info)
 
 
+def _database_observer_id(database: Path, used: set[str]) -> str:
+    stem = re.sub(r"[^a-z0-9]+", "-", database.stem.lower()).strip("-")
+    base = f"sqlite-{stem or 'db'}"
+    candidate = base
+    suffix = 2
+    while candidate in used:
+        candidate = f"{base}-{suffix}"
+        suffix += 1
+    used.add(candidate)
+    return candidate
+
+
 def build_manifest(
     tools: list[dict[str, Any]],
     *,
@@ -290,10 +366,42 @@ def build_manifest(
     inherit_env: list[str] | None = None,
     env: dict[str, str] | None = None,
     protocol_version: str = "2025-11-25",
+    sqlite_queries: list[tuple[str, str]] | None = None,
+    include_sandbox_observer: bool = False,
 ) -> dict[str, Any]:
-    """Turn advertised tools into a manifest, skipping tools we must not auto-call."""
+    """Turn advertised tools into a manifest, skipping tools we must not auto-call.
+
+    ``sqlite_queries`` adds one ``sqlite-query`` observer per ``(database, query)``
+    pair. Because a database server's observable state is its rows, supplying a
+    query replaces the sandbox file observer unless ``include_sandbox_observer``
+    asks for both.
+    """
 
     fixtures = seed_sandbox(observer_root)
+    observers: list[dict[str, Any]] = []
+    used_observer_ids: set[str] = set()
+    database_queries = list(sqlite_queries or [])
+    if include_sandbox_observer or not database_queries:
+        observers.append(
+            {"id": "sandbox", "kind": "filesystem", "root": observer_root, "sensitive": False}
+        )
+        used_observer_ids.add("sandbox")
+    for database, query in database_queries:
+        resolved = Path(database).expanduser().resolve()
+        if not resolved.is_file():
+            raise ScanError(
+                f"SQLite database to observe does not exist: {resolved}; create and seed it "
+                "before scanning"
+            )
+        observers.append(
+            {
+                "id": _database_observer_id(resolved, used_observer_ids),
+                "kind": "sqlite-query",
+                "database": str(resolved),
+                "query": query,
+                "sensitive": False,
+            }
+        )
     cases: list[dict[str, Any]] = []
     skipped: list[dict[str, str]] = []
     used_ids: set[str] = set()
@@ -357,9 +465,7 @@ def build_manifest(
     return {
         "schemaVersion": "effectfence.mcp.v1",
         "server": server,
-        "observers": [
-            {"id": "sandbox", "kind": "filesystem", "root": observer_root, "sensitive": False}
-        ],
+        "observers": observers,
         "cases": cases,
         "policy": {"minimumToolCoverage": minimum_tool_coverage},
         "generated": {

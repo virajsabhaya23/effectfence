@@ -26,6 +26,14 @@ verifies, and writes the report. Pass `--manifest-out` to keep the generated
 manifest, `--include-destructive` to call destructive tools against a disposable
 sandbox, and `--env KEY=VALUE` (repeatable) for servers that need configuration.
 
+With `--sqlite-query DATABASE=SQL` the observed boundary is the rows that query
+returns rather than the sandbox file hash; repeat the flag for several
+observers, and add `--sandbox-observer` to watch both. The database must already
+exist and be seeded before the run, because a scan does not create your schema.
+Observer ids come from the file name (`state.db` becomes `sqlite-state`), and the
+manifest stores an absolute database path so it survives being written into a
+temporary sandbox.
+
 With a hand-written manifest:
 
 ```bash
@@ -133,6 +141,14 @@ the harness rather than a finding about the server. A rejection in a
 hand-written case is still `TOOL_ERROR_EXPECTATION_MISMATCH`. Triage generated
 cases before reporting them.
 
+String arguments are synthesized from the property itself: a URL-shaped name
+(`url`, `uri`, `href`, `endpoint`, `webhook`) or `format: uri` gets a real URL,
+reusing a URL the description gives as an example; an argument that names SQL
+(`sql`, `statement`, or a description mentioning SQL, tables, rows, columns, a
+database or a schema) gets `select 1 as probe`, which parses on SQLite,
+PostgreSQL and MySQL instead of failing on a syntax error. A plain `query` on a
+search tool still gets an opaque probe string.
+
 ### Ambiguous result retries
 
 Set `ambiguousResultFault` on a case to test the failure window where the
@@ -159,8 +175,10 @@ evidence is explicitly inconclusive and can never produce a passing verdict.
 
 - `filesystem`: hashes regular files, records symlinks without following them,
   and enforces file-count and byte limits.
-- `sqlite-query`: opens the database read-only and rejects mutating SQL through
-  SQLite's authorizer API.
+- `sqlite-query`: opens the database read-only, rejects mutating SQL through
+  SQLite's authorizer API, and compares the rows the query returns as a
+  multiset. A removed row is reported as destructive; an insert, update or
+  delete outside the result set is invisible to this observer.
 - `http-json`: performs an allowlisted GET, blocks redirects, caps response size,
   and compares canonical JSON state.
 
@@ -203,8 +221,8 @@ as a CI artifact and use the process exit code as the merge gate.
 ## Evidence boundary
 
 The result is only as complete as the observer set. For example, a filesystem
-observer cannot detect an HTTP call, and snapshot comparison cannot prove an
-external read occurred. Add observers for every state boundary relevant to the
+observer cannot detect an HTTP call, a SQLite observer sees only the rows its
+query selects, and snapshot comparison cannot prove an external read occurred. Add observers for every state boundary relevant to the
 tool. A passing report means no mismatch was observed within that declared
 boundary; it is not proof that the process made no other system call.
 

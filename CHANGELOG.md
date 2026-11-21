@@ -2,6 +2,23 @@
 
 All notable changes will be documented here. This project follows Semantic Versioning and the Keep a Changelog structure.
 
+## 0.4.4 - 2026-11-21
+
+- Added `--sqlite-query DATABASE=SQL` (repeatable) to `mcp-check`, so database
+  servers are verified against the rows a query returns instead of a sandbox
+  file hash that their writes never touch. The flag replaces the sandbox
+  observer; `--sandbox-observer` adds it back when both boundaries matter.
+  Reports now list the configured observers and note when no filesystem
+  boundary was watched, because a pass over rows says nothing about files.
+- Synthesized arguments now give URL-shaped properties (`url`, `uri`, `href`,
+  `endpoint`, `webhook`, `format: uri`) a real URL, reusing an example URL from
+  the description when one is given, instead of an opaque probe string. On
+  network tools that turned a rejected call into a real observation.
+- SQL-shaped arguments (`sql`, `statement`, or a description mentioning SQL,
+  tables, rows, columns, a database or a schema) now get `select 1 as probe`,
+  which parses on SQLite, PostgreSQL and MySQL. A search tool's `query` is still
+  an opaque probe string.
+
 ## 0.4.3 - 2026-11-21
 
 - A tool that publishes no effect annotations and has no case `contract` is now

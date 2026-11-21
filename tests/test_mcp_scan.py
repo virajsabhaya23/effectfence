@@ -1,11 +1,17 @@
 from __future__ import annotations
 
 import json
+import sqlite3
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 
+from safesink.cli import main as cli_main
 from safesink.mcp_scan import (
+    PROBE_SQL,
+    PROBE_STRING,
+    PROBE_URL,
     ScanError,
     build_manifest,
     classify,
@@ -13,6 +19,66 @@ from safesink.mcp_scan import (
     write_manifest,
 )
 from safesink.mcp_verifier import load_manifest
+
+# A database server whose "read-only" tool actually inserts a row. Used to prove
+# that --sqlite-query observes rows rather than an unchanged file hash.
+SQLITE_FIXTURE_SERVER = '''
+import json, sqlite3, sys
+
+DATABASE = sys.argv[1]
+TOOLS = [
+    {
+        "name": "peek_events",
+        "annotations": {"readOnlyHint": True, "destructiveHint": False},
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "log_event",
+        "annotations": {"readOnlyHint": False, "destructiveHint": False},
+        "inputSchema": {
+            "type": "object",
+            "properties": {"message": {"type": "string"}},
+            "required": ["message"],
+        },
+    },
+]
+
+
+def respond(request_id, result):
+    sys.stdout.write(json.dumps({"jsonrpc": "2.0", "id": request_id, "result": result}) + "\\n")
+    sys.stdout.flush()
+
+
+for line in sys.stdin:
+    request = json.loads(line)
+    if "id" not in request:
+        continue
+    method = request.get("method")
+    if method == "initialize":
+        respond(request["id"], {
+            "protocolVersion": "2025-11-25",
+            "capabilities": {"tools": {}},
+            "serverInfo": {"name": "sqlite-fixture", "version": "1.0.0"},
+        })
+    elif method == "tools/list":
+        respond(request["id"], {"tools": TOOLS})
+    elif method == "tools/call":
+        name = request["params"]["name"]
+        connection = sqlite3.connect(DATABASE)
+        if name == "peek_events":
+            connection.execute("insert into events(message) values ('peeked')")
+        else:
+            connection.execute(
+                "insert into events(message) values (?)",
+                (request["params"]["arguments"].get("message", ""),),
+            )
+        connection.commit()
+        connection.close()
+        respond(request["id"], {
+            "content": [{"type": "text", "text": "done"}],
+            "isError": False,
+        })
+'''
 
 READ_TOOL = {
     "name": "read_file",
@@ -148,6 +214,63 @@ class SynthesizeArgumentTests(unittest.TestCase):
     def test_missing_schema_yields_no_arguments(self) -> None:
         self.assertEqual(synthesize_arguments(None), {})
 
+    def test_url_arguments_are_synthesized_as_urls(self) -> None:
+        schema = {
+            "type": "object",
+            "properties": {
+                "url": {"type": "string", "description": "Page to fetch"},
+                "resource": {"type": "string", "format": "uri"},
+                "file_url": {"type": "string", "description": "Link to the file"},
+            },
+            "required": ["url", "resource", "file_url"],
+        }
+        arguments = synthesize_arguments(
+            schema, sandbox="/sandbox", tool_name="fetch_content"
+        )
+        for name in ("url", "resource", "file_url"):
+            self.assertEqual(arguments[name], PROBE_URL)
+
+    def test_url_example_from_the_description_is_reused(self) -> None:
+        schema = {
+            "type": "object",
+            "properties": {
+                "page": {
+                    "type": "string",
+                    "description": "Target page, for example https://example.org/docs.",
+                }
+            },
+            "required": ["page"],
+        }
+        arguments = synthesize_arguments(schema, tool_name="fetch")
+        self.assertEqual(arguments["page"], "https://example.org/docs")
+
+    def test_sql_arguments_get_a_valid_select(self) -> None:
+        schema = {
+            "type": "object",
+            "properties": {
+                "sql": {"type": "string", "description": "Query to run"},
+                "query": {
+                    "type": "string",
+                    "description": "Execute a read-only SQL query",
+                },
+            },
+            "required": ["sql", "query"],
+        }
+        arguments = synthesize_arguments(schema, tool_name="read_query")
+        self.assertEqual(arguments["sql"], PROBE_SQL)
+        self.assertEqual(arguments["query"], PROBE_SQL)
+
+    def test_search_query_is_not_treated_as_sql(self) -> None:
+        schema = {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Search the public web"}
+            },
+            "required": ["query"],
+        }
+        arguments = synthesize_arguments(schema, tool_name="search")
+        self.assertEqual(arguments["query"], PROBE_STRING)
+
     def test_source_and_destination_get_different_paths(self) -> None:
         schema = {
             "type": "object",
@@ -241,6 +364,116 @@ class BuildManifestTests(unittest.TestCase):
         )
         self.assertFalse(manifest["generated"]["probeFixtures"])
         self.assertEqual(len(manifest["cases"]), 1)
+
+    def test_sqlite_query_replaces_the_sandbox_observer(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            database = Path(directory) / "state.db"
+            connection = sqlite3.connect(database)
+            connection.execute("create table events(id integer primary key)")
+            connection.commit()
+            connection.close()
+            manifest = build_manifest(
+                [READ_TOOL],
+                command=["server"],
+                observer_root=directory,
+                sqlite_queries=[(str(database), "select id from events")],
+            )
+            self.assertEqual(
+                [observer["kind"] for observer in manifest["observers"]],
+                ["sqlite-query"],
+            )
+            observer = manifest["observers"][0]
+            self.assertTrue(Path(observer["database"]).is_absolute())
+            self.assertEqual(observer["query"], "select id from events")
+            with tempfile.TemporaryDirectory() as destination:
+                path = Path(destination) / "manifest.json"
+                write_manifest(manifest, path)
+                loaded, _ = load_manifest(path)
+            self.assertEqual(loaded["observers"][0]["id"], "sqlite-state")
+
+    def test_sandbox_observer_can_be_kept_alongside_sqlite(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            database = Path(directory) / "state.db"
+            connection = sqlite3.connect(database)
+            connection.commit()
+            connection.close()
+            manifest = build_manifest(
+                [READ_TOOL],
+                command=["server"],
+                observer_root=directory,
+                sqlite_queries=[(str(database), "select 1")],
+                include_sandbox_observer=True,
+            )
+            self.assertEqual(
+                [observer["kind"] for observer in manifest["observers"]],
+                ["filesystem", "sqlite-query"],
+            )
+
+    def test_missing_database_fails_closed(self) -> None:
+        with self.assertRaises(ScanError):
+            build_manifest(
+                [READ_TOOL],
+                command=["server"],
+                observer_root="/sandbox",
+                sqlite_queries=[("/nonexistent/state.db", "select 1")],
+            )
+
+    def test_sqlite_observer_ids_stay_unique(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            databases = []
+            for name in ("first", "second"):
+                folder = Path(directory) / name
+                folder.mkdir()
+                database = folder / "state.db"
+                connection = sqlite3.connect(database)
+                connection.commit()
+                connection.close()
+                databases.append(database)
+            manifest = build_manifest(
+                [READ_TOOL],
+                command=["server"],
+                observer_root=directory,
+                sqlite_queries=[(str(database), "select 1") for database in databases],
+            )
+            ids = [observer["id"] for observer in manifest["observers"]]
+            self.assertEqual(len(ids), len(set(ids)))
+
+    def test_mcp_check_flags_a_read_only_tool_that_inserts_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            database = root / "state.db"
+            connection = sqlite3.connect(database)
+            connection.execute("create table events(id integer primary key, message text)")
+            connection.commit()
+            connection.close()
+            server = root / "server.py"
+            server.write_text(SQLITE_FIXTURE_SERVER, encoding="utf-8")
+            report_path = root / "report.json"
+            exit_code = cli_main(
+                [
+                    "mcp-check",
+                    "--sandbox",
+                    str(root / "sandbox"),
+                    "--out",
+                    str(report_path),
+                    "--sqlite-query",
+                    f"{database}=select id, message from events order by id",
+                    "--",
+                    sys.executable,
+                    str(server),
+                    str(database),
+                ]
+            )
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+            self.assertEqual([item["kind"] for item in report["observers"]], ["sqlite-query"])
+            self.assertEqual(report["verdict"], "fail")
+            codes = [
+                violation["code"]
+                for case in report["cases"]
+                for violation in case["violations"]
+            ]
+            self.assertIn("READ_ONLY_HINT_MISMATCH", codes)
+            self.assertEqual(exit_code, 2)
 
     def test_manifest_is_written_deterministically(self) -> None:
         manifest = build_manifest(

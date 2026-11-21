@@ -494,6 +494,37 @@ class McpConformanceTests(unittest.TestCase):
             with self.assertRaises(ObserverError):
                 mutating.snapshot()
 
+    def test_report_records_the_observed_boundary(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            database = root / "state.db"
+            connection = sqlite3.connect(database)
+            connection.execute("create table notes(id integer primary key)")
+            connection.commit()
+            connection.close()
+            path = self.manifest(root, [{"id": "read", "tool": "read_note"}])
+            value = json.loads(path.read_text())
+            value["observers"] = [
+                {
+                    "id": "notes",
+                    "kind": "sqlite-query",
+                    "database": "state.db",
+                    "query": "select id from notes",
+                }
+            ]
+            path.write_text(json.dumps(value))
+            report = verify_manifest(path)
+            self.assertEqual([item["kind"] for item in report["observers"]], ["sqlite-query"])
+            # SQLite state is sensitive by default, so the report carries no rows.
+            self.assertTrue(report["observers"][0]["sensitive"])
+            self.assertTrue(
+                any("rows its query returns" in line for line in report["limitations"])
+            )
+            self.assertTrue(
+                any("No filesystem observer" in line for line in report["limitations"])
+            )
+            self.assertEqual(report["verdict"], "pass")
+
     def test_http_json_observer_is_allowlisted_and_bounded(self) -> None:
         state = {"count": 1}
 

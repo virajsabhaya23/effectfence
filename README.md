@@ -53,6 +53,20 @@ can refer to, skips tools declaring `destructiveHint: true`, and verifies what
 changed. Servers that need configuration take `--env KEY=VALUE`, repeatable. The
 command goes after `--` so its own flags are not parsed by `safesink`.
 
+A database server's effects are rows, not files, so point `mcp-check` at a query
+instead of the sandbox hash:
+
+```bash
+safesink mcp-check \
+  --sqlite-query "./state.db=select id, status from orders order by id" \
+  --sandbox-observer \
+  -- npx -y mcp-server-sqlite --db "$PWD/state.db"
+```
+
+The database must already exist and be seeded; a scan does not create your
+schema. `--sqlite-query` is repeatable, replaces the sandbox file observer, and
+adds `--sandbox-observer` back only when you want both boundaries watched.
+
 For a server that needs a curated argument per tool, write a manifest and use
 `mcp-verify` instead:
 
