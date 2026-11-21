@@ -263,6 +263,16 @@ and why a rejected generated call is inconclusive.
 
 ## CI
 
+A reviewable summary needs no extra tooling:
+
+```bash
+safesink mcp-verify safesink.mcp.json --markdown out/report.md --github-summary
+```
+
+`--markdown` writes the verdict banner, score, findings and inconclusive tables
+plus the observed boundary; `--github-summary` appends it to
+`GITHUB_STEP_SUMMARY` so the reason for a red build is on the run page.
+
 ```yaml
 - uses: actions/checkout@v7
 - uses: virajsabhaya23/effectfence@main

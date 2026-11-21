@@ -204,6 +204,135 @@ def write_sarif_report(report: dict[str, Any], path: str | Path) -> None:
     destination.write_text(json.dumps(sarif, indent=2) + "\n", encoding="utf-8")
 
 
+def render_markdown_report(report: dict[str, Any]) -> str:
+    """A reviewable summary for a pull request, where nobody opens artifacts."""
+    verdict = str(report.get("verdict", "unknown"))
+    banner = {
+        "pass": "✅ PASS",
+        "fail": "❌ FAIL",
+        "inconclusive": "⚠️ INCONCLUSIVE",
+    }.get(verdict, verdict.upper())
+    score = report.get("score") or {}
+    cases = report.get("cases", [])
+    coverage = report.get("coverage", {})
+    coverage_ratio = coverage.get("ratio")
+    coverage_text = (
+        f"{round(float(coverage_ratio) * 100)}%"
+        if isinstance(coverage_ratio, (int, float))
+        else "n/a"
+    )
+    findings = [
+        (case, violation)
+        for case in cases
+        for violation in case.get("violations", [])
+    ]
+    unverified = [
+        (case, item)
+        for case in cases
+        for item in case.get("inconclusive", [])
+    ]
+    lines = [
+        f"## SafeSink: {banner}",
+        "",
+        f"**Score:** {score.get('value', 'n/a')}/100 · "
+        f"**Cases:** {len(cases)} · "
+        f"**Tool coverage:** {coverage_text} · "
+        f"**Findings:** {len(findings)} · "
+        f"**Inconclusive:** {len(unverified)}",
+        "",
+    ]
+    if report.get("fatalError"):
+        lines.append(f"> Fatal error: {_fatal_text(report)}")
+        lines.append("")
+    if findings:
+        lines.extend(
+            [
+                "| Tool | Case | Finding | Declaration | Observed |",
+                "| --- | --- | --- | --- | --- |",
+            ]
+        )
+        for case, violation in findings:
+            lines.append(
+                "| {} | {} | `{}` | {} | {} |".format(
+                    _cell(case.get("tool")),
+                    _cell(case.get("id")),
+                    _cell(violation.get("code")),
+                    _cell(_declaration_text(case)),
+                    _cell(violation.get("message")),
+                )
+            )
+        lines.append("")
+    else:
+        lines.extend(["No declaration was contradicted.", ""])
+    if unverified:
+        lines.extend(
+            [
+                "| Tool | Case | Unverified because |",
+                "| --- | --- | --- |",
+            ]
+        )
+        for case, item in unverified:
+            lines.append(
+                "| {} | {} | `{}`: {} |".format(
+                    _cell(case.get("tool")),
+                    _cell(case.get("id")),
+                    _cell(item.get("code")),
+                    _cell(item.get("message")),
+                )
+            )
+        lines.append("")
+    observers = report.get("observers", [])
+    if observers:
+        boundary = ", ".join(
+            f"{observer.get('id')} ({observer.get('kind')}, {observer.get('world')})"
+            for observer in observers
+        )
+        lines.extend([f"**Observed boundary:** {boundary}", ""])
+    baseline = report.get("baseline")
+    if isinstance(baseline, dict):
+        lines.append(
+            f"**Baseline:** {baseline.get('suppressedCount', 0)} accepted, "
+            f"{len(baseline.get('regressions', []))} new, "
+            f"{baseline.get('fixedCount', 0)} fixed"
+        )
+        lines.append("")
+    suppressions = report.get("suppressions")
+    if isinstance(suppressions, dict) and suppressions.get("suppressedCount"):
+        lines.append(
+            f"**Suppressions:** {suppressions['suppressedCount']} accepted with a reason"
+        )
+        lines.append("")
+    if report.get("certificateSha256"):
+        lines.append(f"**Certificate:** `{report['certificateSha256']}`")
+        lines.append("")
+    lines.append(
+        "A pass means no contradiction was observed inside the declared boundary; "
+        "it is not a security certification."
+    )
+    return "\n".join(lines)
+
+
+def write_markdown_report(report: dict[str, Any], path: str | Path) -> None:
+    destination = Path(path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(render_markdown_report(report) + "\n", encoding="utf-8")
+
+
+def _cell(value: Any) -> str:
+    text = str(value if value is not None else "").replace("|", "\\|")
+    return text.replace("\n", " ")[:400]
+
+
+def _declaration_text(case: dict[str, Any]) -> str:
+    declarations = case.get("declarations") or {}
+    parts = [
+        f"{name}={value.get('value')}"
+        for name, value in sorted(declarations.items())
+        if isinstance(value, dict)
+    ]
+    return ", ".join(parts) or "nothing declared"
+
+
 def _fatal_text(report: dict[str, Any]) -> str:
     fatal = report.get("fatalError")
     if not isinstance(fatal, dict):
