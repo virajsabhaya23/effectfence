@@ -9,6 +9,18 @@ All notable changes will be documented here. This project follows Semantic Versi
 
 ## Unreleased
 
+- Added `--version` to the CLI (works as `safesink --version`, `python -m safesink
+  --version`, and through the deprecated `effectfence` alias, which reports the
+  program name it was invoked as).
+- `effectfence` is now a thin deprecation shim that re-exports `safesink` instead of
+  a second copy of the implementation, so fixes can no longer diverge between the
+  two import paths. A compatibility test asserts every shimmed module re-exports
+  the same public objects, that versions agree, and that both CLI entry points
+  return identical verdict exit codes.
+- CI and the local gates (format hygiene, lint, type-interface, compile, benchmark)
+  now cover the primary `safesink` package as well as the alias; the type-interface
+  gate discovers modules automatically instead of using a hand-maintained list.
+
 - Added an observer non-interference control schedule. Every MCP case (and every
   ambiguous-result trial) now runs matched no-tool observation rounds using the
   exact same observer sequence before the tool is invoked. A state transition that

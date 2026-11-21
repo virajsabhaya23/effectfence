@@ -1,7 +1,7 @@
 from pathlib import Path
 import sys
 errors=[]
-for base in ("effectfence","tests","scripts"):
+for base in ("safesink","effectfence","tests","scripts"):
     for p in Path(base).rglob("*.py"):
         text=p.read_text()
         if text and not text.endswith("\n"): errors.append(f"{p}: missing final newline")

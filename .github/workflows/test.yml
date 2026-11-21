@@ -30,11 +30,17 @@ jobs:
       - name: Type interface check
         run: python scripts/typecheck.py
       - name: Compile
-        run: python -m compileall -q effectfence tests
+        run: python -m compileall -q safesink effectfence tests
+      - name: CLI smoke (both entry points)
+        run: |
+          safesink --version
+          effectfence --version
+          safesink verify examples/safe_fenced_recovery.json
+          effectfence verify examples/safe_fenced_recovery.json
       - name: Unit tests
         run: python -m unittest discover -s tests -v
       - name: Benchmark corpus (30 cases)
-        run: python -m effectfence benchmark benchmark/corpus.json --out benchmark/results.json
+        run: python -m safesink benchmark benchmark/corpus.json --out benchmark/results.json
       - name: Keep benchmark results
         if: always()
         uses: actions/upload-artifact@v7
