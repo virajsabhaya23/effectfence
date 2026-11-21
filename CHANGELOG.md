@@ -15,6 +15,15 @@ All notable changes will be documented here. This project follows Semantic Versi
   modern one, and returns `structuredContent` with an `outputSchema` per tool so an
   agent can consume results without parsing prose.
 
+- `safesink audit`: reads a host config (Claude Desktop, VS Code, Cursor, or
+  `.mcp.json`), builds a manifest per configured server, verifies each, and reports
+  verdict, score, findings and inconclusive counts per server. A server that cannot
+  start is `error`, not a pass, and one failure never hides the others.
+- `server.json` for the official MCP Registry, with `docs/REGISTRY.md` covering the
+  owner-only publish step.
+- `docs/USE_CASES.md`: five personas, the command each runs, and the honest limit of
+  each result; `safesink-mcp` now also returns `structuredContent` for agents.
+
 ### Changed
 
 - `server.protocolVersion` and `build_manifest`/`mcp-scan` default to `"auto"`:

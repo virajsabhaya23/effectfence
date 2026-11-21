@@ -7,6 +7,7 @@ import shutil
 import sys
 import tempfile
 from pathlib import Path
+from urllib.parse import urlparse
 
 from . import __version__
 from .certificates import (
@@ -16,6 +17,7 @@ from .certificates import (
     sign_certificate,
     verify_certificate,
 )
+from .host_config import HostConfigError, existing_config_paths, load_host_config
 from .mcp_client import McpClientError
 from .mcp_lint import lint_manifest, lint_tools
 from .mcp_reports import (
@@ -354,7 +356,7 @@ def build_parser(prog: str = "safesink") -> argparse.ArgumentParser:
     _add_suppression_options(check)
     _add_isolation_options(check)
     _add_report_options(check)
-    check.add_argument("--protocol-version", default="2025-11-25")
+    check.add_argument("--protocol-version", default="auto")
     check.add_argument("--startup-timeout", type=float, default=60.0)
     check.add_argument(
         "--keep-sandbox",
@@ -389,7 +391,7 @@ def build_parser(prog: str = "safesink") -> argparse.ArgumentParser:
         metavar="KEY=VALUE",
         help="environment variable for the server (repeatable)",
     )
-    lint.add_argument("--protocol-version", default="2025-11-25")
+    lint.add_argument("--protocol-version", default="auto")
     lint.add_argument("--startup-timeout", type=float, default=60.0)
     lint.add_argument(
         "command",
@@ -421,7 +423,7 @@ def build_parser(prog: str = "safesink") -> argparse.ArgumentParser:
         "--env", action="append", default=[], metavar="KEY=VALUE",
         help="environment variable for the server (repeatable)",
     )
-    init.add_argument("--protocol-version", default="2025-11-25")
+    init.add_argument("--protocol-version", default="auto")
     init.add_argument("--startup-timeout", type=float, default=60.0)
 
     badge = commands.add_parser(
@@ -515,14 +517,213 @@ def build_parser(prog: str = "safesink") -> argparse.ArgumentParser:
         metavar="KEY=VALUE",
         help="environment variable for the server (repeatable)",
     )
-    scan.add_argument("--protocol-version", default="2025-11-25")
+    scan.add_argument("--protocol-version", default="auto")
     scan.add_argument("--startup-timeout", type=float, default=60.0)
     scan.add_argument(
         "command",
         nargs="+",
         help="stdio command that starts the server; place it after ' -- '",
     )
+    audit = commands.add_parser(
+        "audit",
+        help="check every MCP server already configured in a host config file",
+    )
+    audit.add_argument(
+        "--config",
+        action="append",
+        default=[],
+        metavar="PATH",
+        help="host config to read (repeatable; default: the usual Claude Desktop, VS Code and Cursor locations)",
+    )
+    audit.add_argument(
+        "--server",
+        action="append",
+        default=[],
+        metavar="NAME",
+        help="only audit these configured servers (repeatable)",
+    )
+    audit.add_argument(
+        "--out-dir",
+        default="out/safesink-audit",
+        help="directory for manifests, reports and sandboxes",
+    )
+    audit.add_argument("--sandbox")
+    audit.add_argument(
+        "--include-destructive",
+        action="store_true",
+        help="also test tools declaring destructiveHint (in the sandbox only)",
+    )
+    audit.add_argument("--timeout", type=float, help="per-server run budget in seconds")
+    audit.add_argument("--startup-timeout", type=float, default=30.0)
+    audit.add_argument(
+        "--markdown",
+        help="write a one-table Markdown summary instead of only JSON",
+    )
     return parser
+
+
+def _safe_directory_name(value: str) -> str:
+    cleaned = "".join(
+        character if character.isalnum() or character in "-_." else "-"
+        for character in value
+    ).strip("-")
+    return cleaned or "server"
+
+
+def _audit_one(
+    arguments: argparse.Namespace,
+    out_dir: Path,
+    config_path: Path,
+    configured: object,
+) -> dict:
+    name = configured.name  # type: ignore[attr-defined]
+    workdir = out_dir / _safe_directory_name(name)
+    workdir.mkdir(parents=True, exist_ok=True)
+    sandbox = (
+        Path(arguments.sandbox).expanduser().resolve()
+        if arguments.sandbox
+        else workdir / "sandbox"
+    )
+    sandbox.mkdir(parents=True, exist_ok=True)
+    manifest_path = workdir / "manifest.json"
+    report_path = workdir / "report.json"
+    url = configured.url  # type: ignore[attr-defined]
+    command = list(configured.command)  # type: ignore[attr-defined]
+    row: dict = {
+        "server": name,
+        "config": str(config_path),
+        "transport": configured.kind,  # type: ignore[attr-defined]
+        "report": str(report_path),
+    }
+    try:
+        allowed_hosts = None
+        if url:
+            host = urlparse(url).hostname
+            if not host:
+                raise ScanError("configured url has no host")
+            allowed_hosts = (host,)
+        cwd = (
+            Path(configured.cwd).expanduser().resolve()  # type: ignore[attr-defined]
+            if configured.cwd  # type: ignore[attr-defined]
+            else Path.cwd()
+        )
+        tools, _ = list_server_tools(
+            command,
+            cwd=cwd,
+            inherit_env=["HOME"],
+            env=dict(configured.env),  # type: ignore[attr-defined]
+            protocol_version="auto",
+            startup_timeout_seconds=arguments.startup_timeout,
+            url=url,
+            allowed_hosts=allowed_hosts,
+        )
+        manifest = build_manifest(
+            tools,
+            command=command or ["true"],
+            observer_root=str(sandbox),
+            include_destructive=arguments.include_destructive,
+            env=dict(configured.env),  # type: ignore[attr-defined]
+            protocol_version="auto",
+            url=url,
+            allowed_hosts=allowed_hosts,
+        )
+        write_manifest(manifest, manifest_path)
+        report = verify_manifest(manifest_path, timeout_seconds=arguments.timeout)
+        write_json_report(report, report_path)
+        cases = report["cases"]
+        row.update(
+            {
+                "verdict": report["verdict"],
+                "score": report["score"]["value"],
+                "tools": len(tools),
+                "cases": len(cases),
+                "findings": sum(len(case.get("violations", [])) for case in cases),
+                "inconclusive": sum(1 for case in cases if case.get("inconclusive")),
+                "negotiatedProtocolVersion": report["server"].get(
+                    "negotiated_protocol_version"
+                ),
+            }
+        )
+    except (ScanError, McpClientError, ManifestError, OSError) as error:
+        # One broken server must not hide the results of the others.
+        row.update({"verdict": "error", "error": str(error)[:500]})
+    return row
+
+
+def _audit_markdown(rows: list[dict]) -> str:
+    lines = [
+        "| Server | Transport | Verdict | Score | Findings | Inconclusive |",
+        "| --- | --- | --- | --- | --- | --- |",
+    ]
+    for row in rows:
+        lines.append(
+            "| `{}` | {} | {} | {} | {} | {} |".format(
+                row["server"],
+                row.get("transport", ""),
+                row.get("verdict", ""),
+                row.get("score", ""),
+                row.get("findings", ""),
+                row.get("inconclusive", ""),
+            )
+        )
+    lines.append("")
+    lines.append(
+        "Every row is one pinned set of tools from a host config. An `inconclusive` "
+        "column that is not zero means the tool could not be checked, not that it "
+        "passed; `error` means it could not be started."
+    )
+    return "\n".join(lines) + "\n"
+
+
+def _run_audit(parser: argparse.ArgumentParser, arguments: argparse.Namespace) -> int:
+    paths = (
+        [Path(item).expanduser() for item in arguments.config]
+        if arguments.config
+        else existing_config_paths()
+    )
+    if not paths:
+        _die(
+            parser,
+            "no MCP host config found",
+            hint=(
+                "pass --config path/to/claude_desktop_config.json, or create "
+                "a .mcp.json in this directory"
+            ),
+        )
+        return 2
+    out_dir = Path(arguments.out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    rows: list[dict] = []
+    for path in paths:
+        try:
+            configured = load_host_config(path)
+        except HostConfigError as error:
+            _die(parser, str(error))
+            return 2
+        for name, server in configured.items():
+            if arguments.server and name not in arguments.server:
+                continue
+            rows.append(_audit_one(arguments, out_dir, path, server))
+    if not rows:
+        _die(parser, "no configured servers matched --server")
+        return 2
+    failures = [row for row in rows if row.get("verdict") != "pass"]
+    print(
+        json.dumps(
+            {
+                "configs": [str(path) for path in paths],
+                "servers": rows,
+                "passed": len(rows) - len(failures),
+                "needsAttention": len(failures),
+            },
+            indent=2,
+        )
+    )
+    if arguments.markdown:
+        destination = Path(arguments.markdown)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(_audit_markdown(rows), encoding="utf-8")
+    return 1 if failures else 0
 
 
 def _below_min_score(report: dict, minimum: float | None) -> bool:
@@ -597,6 +798,9 @@ def _print_case_verdicts(report: dict) -> None:
 def main(argv: list[str] | None = None, prog: str = "safesink") -> int:
     parser = build_parser(prog)
     arguments = parser.parse_args(argv)
+
+    if arguments.cmd == "audit":
+        return _run_audit(parser, arguments)
 
     if arguments.cmd == "mcp-check":
         temporary = arguments.sandbox is None
