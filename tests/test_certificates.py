@@ -141,7 +141,7 @@ class CertificateCliTests(unittest.TestCase):
     def test_keygen_prints_a_usable_pair(self) -> None:
         stdout = io.StringIO()
         with contextlib.redirect_stdout(stdout):
-            self.assertEqual(cli_main(["sign", "--keygen", "--report", "unused"]), 0)
+            self.assertEqual(cli_main(["sign", "--keygen"]), 0)
         value = json.loads(stdout.getvalue())
         self.assertEqual(len(value["privateKey"]), 64)
         self.assertEqual(len(value["publicKey"]), 64)

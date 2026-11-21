@@ -434,7 +434,7 @@ def build_parser(prog: str = "safesink") -> argparse.ArgumentParser:
     sign = commands.add_parser(
         "sign", help="issue a detached certificate for a report (optionally Ed25519-signed)"
     )
-    sign.add_argument("--report", required=True, help="JSON report to certify")
+    sign.add_argument("--report", help="JSON report to certify (not needed with --keygen)")
     sign.add_argument(
         "--out", default="safesink-certificate.json", help="certificate path"
     )
@@ -875,6 +875,9 @@ def main(argv: list[str] | None = None, prog: str = "safesink") -> int:
                 )
             )
             return 0
+        if not arguments.report:
+            _die(parser, "--report is required to sign a report", hint="safesink sign --keygen")
+            return 2
         try:
             report = json.loads(Path(arguments.report).read_text(encoding="utf-8"))
         except FileNotFoundError:
