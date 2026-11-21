@@ -97,6 +97,37 @@ def _parse_contracts(
     return contracts
 
 
+def _load_baseline(
+    parser: argparse.ArgumentParser, path: str | None, new_only: bool
+) -> tuple[dict | None, str | None]:
+    if new_only and not path:
+        _die(parser, "--new-only requires --baseline PREVIOUS-REPORT.json")
+    if not path:
+        return None, None
+    try:
+        value = json.loads(Path(path).read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        _die(parser, f"baseline report not found: {path}")
+    except (OSError, json.JSONDecodeError) as error:
+        _die(parser, f"could not read baseline report: {error}")
+    if not isinstance(value, dict):
+        _die(parser, "baseline report must be a JSON object")
+    return value, path
+
+
+def _add_baseline_options(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--baseline",
+        metavar="REPORT.json",
+        help="previous report; findings it already recorded are not new",
+    )
+    parser.add_argument(
+        "--new-only",
+        action="store_true",
+        help="fail only on findings absent from --baseline",
+    )
+
+
 def _add_contract_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--contract",
@@ -201,6 +232,7 @@ def build_parser(prog: str = "safesink") -> argparse.ArgumentParser:
         help="stop issuing calls after this many seconds and report the rest as unverified",
     )
     _add_contract_options(check)
+    _add_baseline_options(check)
     check.add_argument("--protocol-version", default="2025-11-25")
     check.add_argument("--startup-timeout", type=float, default=60.0)
     check.add_argument(
@@ -258,6 +290,7 @@ def build_parser(prog: str = "safesink") -> argparse.ArgumentParser:
         type=float,
         help="fail when the documented trust score is below this value (0-100)",
     )
+    _add_baseline_options(mcp)
     mcp.add_argument("--verbose", action="store_true", help="print per-case verdicts")
     mcp.add_argument(
         "--capture-stderr",
@@ -397,6 +430,9 @@ def main(argv: list[str] | None = None, prog: str = "safesink") -> int:
             if arguments.contract_all
             else None
         )
+        baseline, baseline_path = _load_baseline(
+            parser, arguments.baseline, arguments.new_only
+        )
         try:
             tools, server_info = list_server_tools(
                 arguments.command,
@@ -478,6 +514,9 @@ def main(argv: list[str] | None = None, prog: str = "safesink") -> int:
                 manifest_path,
                 capture_stderr=arguments.capture_stderr,
                 timeout_seconds=arguments.timeout,
+                baseline=baseline,
+                baseline_path=baseline_path,
+                new_only=arguments.new_only,
             )
         except ScanError as error:
             _die(parser, str(error))
@@ -575,11 +614,17 @@ def main(argv: list[str] | None = None, prog: str = "safesink") -> int:
         return 0
 
     if arguments.cmd == "mcp-verify":
+        baseline, baseline_path = _load_baseline(
+            parser, arguments.baseline, arguments.new_only
+        )
         try:
             report = verify_manifest(
                 arguments.manifest,
                 capture_stderr=arguments.capture_stderr,
                 timeout_seconds=arguments.timeout,
+                baseline=baseline,
+                baseline_path=baseline_path,
+                new_only=arguments.new_only,
             )
         except ManifestError as error:
             _die(parser, str(error), hint="see docs/MCP_CONFORMANCE.md#manifest")

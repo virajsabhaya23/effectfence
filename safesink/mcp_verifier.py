@@ -68,6 +68,9 @@ def verify_manifest(
     *,
     capture_stderr: bool = False,
     timeout_seconds: float | None = None,
+    baseline: dict[str, Any] | None = None,
+    baseline_path: str | Path | None = None,
+    new_only: bool = False,
 ) -> dict[str, Any]:
     # Imported lazily: this module is imported while ``safesink/__init__`` runs,
     # so the package version does not exist yet at module-import time.
@@ -174,6 +177,20 @@ def verify_manifest(
         if client:
             client.close()
 
+    baseline_info: dict[str, Any] | None = None
+    if new_only:
+        if baseline is None:
+            raise ManifestError("--new-only requires a baseline report")
+        baseline_info = _apply_baseline(results, baseline)
+        baseline_info["path"] = str(baseline_path) if baseline_path else None
+        if baseline_path:
+            try:
+                baseline_info["sha256"] = hashlib.sha256(
+                    Path(baseline_path).read_bytes()
+                ).hexdigest()
+            except OSError:
+                baseline_info["sha256"] = None
+
     listed_names = {tool["name"] for tool in tools}
     tested_names = {case["tool"] for case in manifest["cases"]}
     coverage = sorted(listed_names & tested_names)
@@ -238,6 +255,7 @@ def verify_manifest(
             "timeoutSeconds": budget,
             "exhausted": budget_exhausted,
         },
+        "baseline": baseline_info,
         "observers": observer_summary,
         "cases": results,
         "limitations": _limitations(observer_summary),
@@ -294,6 +312,66 @@ def _score(
             "requiredCoverage": required_coverage,
             "fatalError": fatal_error is not None,
         },
+    }
+
+
+def _apply_baseline(
+    results: list[dict[str, Any]], baseline: dict[str, Any]
+) -> dict[str, Any]:
+    """Drop findings the baseline already recorded, and report what changed.
+
+    The key is ``(caseId, code)`` rather than the message: a message can change
+    while the finding stays the same, and a case whose declaration source moves
+    from an annotation to a contract is still the same case. Nothing is hidden:
+    every suppressed finding is listed with its reason, and a finding that is not
+    in the baseline still fails the run.
+    """
+    known: set[tuple[str, str]] = set()
+    for case in baseline.get("cases", []):
+        if not isinstance(case, dict):
+            continue
+        case_id = str(case.get("id"))
+        for violation in case.get("violations", []) or []:
+            if isinstance(violation, dict):
+                known.add((case_id, str(violation.get("code"))))
+
+    suppressed: list[dict[str, Any]] = []
+    regressions: list[dict[str, Any]] = []
+    current: set[tuple[str, str]] = set()
+    for case in results:
+        remaining: list[dict[str, Any]] = []
+        for violation in case.get("violations", []):
+            key = (case["id"], str(violation.get("code")))
+            current.add(key)
+            if key in known:
+                suppressed.append(
+                    {
+                        "caseId": case["id"],
+                        "tool": case.get("tool"),
+                        "code": violation.get("code"),
+                        "reason": "recorded in the baseline",
+                    }
+                )
+            else:
+                remaining.append(violation)
+                regressions.append(
+                    {"caseId": case["id"], "code": violation.get("code")}
+                )
+        case["violations"] = remaining
+        case["passed"] = not remaining and not case.get("inconclusive")
+    fixed = sorted(f"{case_id}:{code}" for case_id, code in known - current)
+    summary: list[str] = []
+    if regressions:
+        summary.append("BASELINE_REGRESSION")
+    if fixed:
+        summary.append("BASELINE_FIXED")
+    return {
+        "summary": summary,
+        "suppressedCount": len(suppressed),
+        "suppressed": suppressed,
+        "regressions": regressions,
+        "fixed": fixed,
+        "fixedCount": len(fixed),
     }
 
 
