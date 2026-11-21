@@ -24,6 +24,16 @@ All notable changes will be documented here. This project follows Semantic Versi
 - `docs/USE_CASES.md`: five personas, the command each runs, and the honest limit of
   each result; `safesink-mcp` now also returns `structuredContent` for agents.
 
+### Fixed
+
+- The built wheel's `entry_points.txt` was hand-maintained and had drifted: a
+  `pip install safesink` produced no `safesink-mcp` command. It is now generated
+  from `[project.scripts]`, with a test that every declared script reaches the
+  wheel.
+- `safesink audit` with no `--config` aborted on the first discovered file that
+  had no server map. Discovered configs are best effort and reported under
+  `skippedConfigs`; an explicitly named config still fails loudly.
+
 ### Changed
 
 - `server.protocolVersion` and `build_manifest`/`mcp-scan` default to `"auto"`:

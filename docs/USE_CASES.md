@@ -41,6 +41,12 @@ when called the way the generated cases call them. **What it does not prove:**
 that an unannotated server is safe; those cases stay inconclusive by design, and
 the fix is a contract, not a guess.
 
+A tool that needs state the audit did not seed (a note file, a database row) will
+report `CASE_EXECUTION_FAILED` rather than pass, because the observation never
+happened. That is deliberate - an error is not evidence of honesty - but it means
+a first audit of a stateful server is a map of preconditions, not a verdict. Seed
+them with a manifest's `setup` or verify that server with `mcp-verify`.
+
 ## 3. An AI agent checking its own work
 
 An agent writing an MCP server or a manifest can lint it without being handed a
