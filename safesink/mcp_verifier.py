@@ -74,6 +74,8 @@ def verify_manifest(
     suppressions: dict[str, Any] | None = None,
     suppression_path: str | Path | None = None,
     fail_on_suppressed: bool = False,
+    restart_per_case: bool | None = None,
+    case_order: str | None = None,
 ) -> dict[str, Any]:
     # Imported lazily: this module is imported while ``safesink/__init__`` runs,
     # so the package version does not exist yet at module-import time.
@@ -110,6 +112,13 @@ def verify_manifest(
         budget = float(declared_budget) if declared_budget is not None else None
     if budget is not None and budget <= 0:
         raise ManifestError("run timeout must be positive")
+    restart = (
+        restart_per_case
+        if restart_per_case is not None
+        else bool(server.get("restartPerCase", False))
+    )
+    ordering = case_order or str(server.get("caseOrder", "file"))
+    ordered_cases = _order_cases(manifest, ordering)
     started = time.time()
     budget_exhausted = False
     results: list[dict[str, Any]] = []
@@ -120,22 +129,16 @@ def verify_manifest(
     current_case: str | None = None
     tools: list[dict[str, Any]] = []
     client: McpStdioClient | None = None
+    restarts = 0
     try:
-        client = McpStdioClient(
-            list(server["command"]),
-            cwd=server_cwd,
-            environment=environment,
-            request_timeout_seconds=float(server.get("requestTimeoutSeconds", 30)),
-            startup_timeout_seconds=float(server.get("startupTimeoutSeconds", 15)),
-            protocol_version=str(server.get("protocolVersion", "2025-11-25")),
-            max_message_bytes=int(server.get("maxMessageBytes", 8 * 1024 * 1024)),
-        )
+        client = _new_client(server, server_cwd, environment)
         client.start()
         phase = "tools/list"
         tools = client.list_tools(max_pages=int(server.get("maxListPages", 100)))
         indexed_tools = {tool["name"]: tool for tool in tools}
         phase = "case"
-        for index, case in enumerate(manifest["cases"]):
+        server_instance = 0
+        for index, case in enumerate(ordered_cases):
             current_case = case["id"]
             # One hanging tool must not stall a CI gate for timeout x cases. When
             # the budget is spent, the remaining cases are reported as unverified
@@ -143,20 +146,28 @@ def verify_manifest(
             if budget is not None and time.time() - started > budget:
                 budget_exhausted = True
                 results.extend(
-                    _unbudgeted_case(remaining)
-                    for remaining in manifest["cases"][index:]
+                    _unbudgeted_case(remaining, server_instance)
+                    for remaining in ordered_cases[index:]
                 )
                 break
-            results.append(
-                _run_case(
-                    case,
-                    client=client,
-                    tool=indexed_tools.get(case["tool"]),
-                    observers=observers,
-                    base=base,
-                    server_environment=environment,
-                )
+            if restart and index > 0:
+                # A stateful server carries locks, caches and sessions into the
+                # next case; a fresh process is the only way to attribute a delta.
+                client.close()
+                restarts += 1
+                server_instance += 1
+                client = _new_client(server, server_cwd, environment)
+                client.start()
+            result = _run_case(
+                case,
+                client=client,
+                tool=indexed_tools.get(case["tool"]),
+                observers=observers,
+                base=base,
+                server_environment=environment,
             )
+            result["serverInstance"] = server_instance
+            results.append(result)
     except (McpClientError, ObserverError, OSError, ValueError) as error:
         fatal_error = {
             "message": _safe_error(error),
@@ -174,6 +185,9 @@ def verify_manifest(
                 client.negotiated_protocol_version if client else None
             ),
             "stderr_present": stderr_present,
+            "restarts": restarts,
+            "restartPerCase": restart,
+            "caseOrder": ordering,
         }
         if want_stderr and client and client.stderr_tail:
             server_metadata["stderrExcerpt"] = _stderr_excerpt(client.stderr_tail)
@@ -484,7 +498,42 @@ def _apply_baseline(
     }
 
 
-def _unbudgeted_case(case: dict[str, Any]) -> dict[str, Any]:
+def _new_client(
+    server: dict[str, Any], server_cwd: Path, environment: dict[str, str]
+) -> McpStdioClient:
+    """Construct a client without starting it, so a failed start keeps stderr."""
+    return McpStdioClient(
+        list(server["command"]),
+        cwd=server_cwd,
+        environment=environment,
+        request_timeout_seconds=float(server.get("requestTimeoutSeconds", 30)),
+        startup_timeout_seconds=float(server.get("startupTimeoutSeconds", 15)),
+        protocol_version=str(server.get("protocolVersion", "2025-11-25")),
+        max_message_bytes=int(server.get("maxMessageBytes", 8 * 1024 * 1024)),
+    )
+
+
+def _order_cases(
+    manifest: dict[str, Any], ordering: str
+) -> list[dict[str, Any]]:
+    cases = list(manifest["cases"])
+    if ordering == "name":
+        return sorted(cases, key=lambda case: case["id"])
+    if ordering == "manifest":
+        declared = manifest.get("caseOrder")
+        if not isinstance(declared, list):
+            return cases
+        index = {str(case_id): position for position, case_id in enumerate(declared)}
+        return sorted(
+            cases,
+            key=lambda case: (index.get(case["id"], len(index)), cases.index(case)),
+        )
+    return cases
+
+
+def _unbudgeted_case(
+    case: dict[str, Any], server_instance: int = 0
+) -> dict[str, Any]:
     """A case the run never reached because the time budget was spent."""
     return {
         "id": case["id"],
@@ -498,6 +547,7 @@ def _unbudgeted_case(case: dict[str, Any]) -> dict[str, Any]:
         "declarations": {},
         "calls": [],
         "deltas": {"firstCall": [], "retry": []},
+        "serverInstance": server_instance,
         "violations": [],
         "inconclusive": [
             {
@@ -1102,6 +1152,10 @@ def _validate_manifest(manifest: dict[str, Any]) -> None:
         raise ManifestError("server.transport must be 'stdio'")
     if "captureStderr" in server and not isinstance(server["captureStderr"], bool):
         raise ManifestError("server.captureStderr must be a boolean")
+    if "restartPerCase" in server and not isinstance(server["restartPerCase"], bool):
+        raise ManifestError("server.restartPerCase must be a boolean")
+    if server.get("caseOrder", "file") not in {"file", "name", "manifest"}:
+        raise ManifestError("server.caseOrder must be file, name or manifest")
     cases = manifest.get("cases")
     if not isinstance(cases, list) or not cases:
         raise ManifestError("cases must be a non-empty array")

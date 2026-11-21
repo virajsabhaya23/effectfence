@@ -145,6 +145,19 @@ def _add_suppression_options(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _add_isolation_options(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--restart-per-case",
+        action="store_true",
+        help="restart the server between cases so no state carries over",
+    )
+    parser.add_argument(
+        "--case-order",
+        choices=("file", "name", "manifest"),
+        help="case execution order: as written, alphabetical, or manifest.caseOrder",
+    )
+
+
 def _add_baseline_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--baseline",
@@ -264,6 +277,7 @@ def build_parser(prog: str = "safesink") -> argparse.ArgumentParser:
     _add_contract_options(check)
     _add_baseline_options(check)
     _add_suppression_options(check)
+    _add_isolation_options(check)
     check.add_argument("--protocol-version", default="2025-11-25")
     check.add_argument("--startup-timeout", type=float, default=60.0)
     check.add_argument(
@@ -323,6 +337,7 @@ def build_parser(prog: str = "safesink") -> argparse.ArgumentParser:
     )
     _add_baseline_options(mcp)
     _add_suppression_options(mcp)
+    _add_isolation_options(mcp)
     mcp.add_argument("--verbose", action="store_true", help="print per-case verdicts")
     mcp.add_argument(
         "--capture-stderr",
@@ -555,6 +570,8 @@ def main(argv: list[str] | None = None, prog: str = "safesink") -> int:
                 suppressions=suppressions,
                 suppression_path=suppressions_path,
                 fail_on_suppressed=arguments.fail_on_suppressed,
+                restart_per_case=arguments.restart_per_case or None,
+                case_order=arguments.case_order,
             )
         except ScanError as error:
             _die(parser, str(error))
@@ -669,6 +686,8 @@ def main(argv: list[str] | None = None, prog: str = "safesink") -> int:
                 suppressions=suppressions,
                 suppression_path=suppressions_path,
                 fail_on_suppressed=arguments.fail_on_suppressed,
+                restart_per_case=arguments.restart_per_case or None,
+                case_order=arguments.case_order,
             )
         except ManifestError as error:
             _die(parser, str(error), hint="see docs/MCP_CONFORMANCE.md#manifest")
