@@ -3,6 +3,12 @@ name: Publish to PyPI
 on:
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to publish (must match pyproject.toml and safesink/__init__.py)
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -16,6 +22,60 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
+      - name: Check the requested version matches every source of truth
+        env:
+          REQUESTED: ${{ inputs.version }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import ast, os, pathlib, re, sys
+
+          expected = os.environ["REQUESTED"] or os.environ["TAG"]
+          expected = expected.strip().lstrip("v")
+          pyproject = pathlib.Path("pyproject.toml").read_text(encoding="utf-8")
+          declared = re.search(r'(?m)^version\s*=\s*"([^"]+)"', pyproject)
+          module = ast.parse(pathlib.Path("safesink/__init__.py").read_text(encoding="utf-8"))
+          module_version = next(
+              node.value.value
+              for node in module.body
+              if isinstance(node, ast.Assign)
+              for target in node.targets
+              if isinstance(target, ast.Name) and target.id == "__version__"
+          )
+          backend = pathlib.Path("build_backend.py").read_text(encoding="utf-8")
+          problems = []
+          if not expected:
+              problems.append("no version was supplied")
+          if declared is None or declared.group(1) != expected:
+              problems.append(f"pyproject.toml says {declared.group(1) if declared else 'nothing'}")
+          if module_version != expected:
+              problems.append(f"safesink/__init__.py says {module_version}")
+          if f'VERSION = "{expected}"' not in backend:
+              problems.append("build_backend.py has a different VERSION")
+          if problems:
+              print("::error::release version mismatch: " + "; ".join(problems))
+              sys.exit(1)
+          print(f"version {expected} matches pyproject.toml, safesink/__init__.py and build_backend.py")
+          PY
+      - name: Changelog must describe this version
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+          REQUESTED: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          version="$(printf '%s' "${REQUESTED:-$TAG}" | sed 's/^v//')"
+          if ! grep -qE "^## \\[?${version//./\\.}\\]?" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md has no '## $version' section"
+            exit 1
+          fi
+      - name: Run the gates before publishing
+        run: |
+          python -m pip install -e . || python -m pip install .
+          python -m unittest discover -s tests
+          python scripts/format_check.py
+          python scripts/lint.py
+          python scripts/typecheck.py
       - name: Build distributions
         run: |
           python -m pip install --upgrade build
@@ -44,3 +104,33 @@ jobs:
           path: dist/
       - name: Publish distributions
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # release/v1
+
+  verify-published:
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Install the published wheel in a clean environment
+        env:
+          REQUESTED: ${{ inputs.version }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          version="$(printf '%s' "${REQUESTED:-$TAG}" | sed 's/^v//')"
+          for attempt in 1 2 3 4 5; do
+            if python -m pip install --no-cache-dir "safesink==${version}"; then
+              break
+            fi
+            if [ "$attempt" = 5 ]; then
+              echo "::error::safesink ${version} is not installable from PyPI after 5 attempts"
+              exit 1
+            fi
+            sleep 20
+          done
+          safesink --help > /dev/null
+          safesink mcp-verify --help > /dev/null
+          python -c "import safesink, sys; sys.exit(0 if safesink.__version__ == '${version}' else 1)"
+          echo "safesink ${version} installs and answers from PyPI"
