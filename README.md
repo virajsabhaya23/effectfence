@@ -131,8 +131,20 @@ unverified case as verified.
 
 A tool that publishes **no annotations at all** has nothing to contradict, so it
 is reported as `NO_DECLARED_ANNOTATIONS` and is never called: a pass there would
-claim the tool was verified when no check existed. Add a `contract` to a case if
-you want to verify an unannotated server against your own policy.
+claim the tool was verified when no check existed. Declare your own policy
+instead, without hand-writing a manifest:
+
+```bash
+safesink mcp-check \
+  --contract-all readOnlyHint:false \
+  --contract list_tables=readOnlyHint:true,idempotentHint:true \
+  -- npx -y mcp-server-sqlite-npx "$PWD/state.db"
+```
+
+`--contract-all` sets the policy for every tool and `--contract` overrides it per
+tool. The report marks every such declaration with
+`source: "manifest-contract"`, never as the server's own annotation, so a pass is
+never mistaken for the server telling the truth.
 
 Two behaviours keep false findings out of reports:
 

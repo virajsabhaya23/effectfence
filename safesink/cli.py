@@ -11,6 +11,7 @@ from . import __version__
 from .mcp_client import McpClientError
 from .mcp_reports import write_json_report, write_junit_report, write_sarif_report
 from .mcp_scan import (
+    HINT_NAMES,
     ScanError,
     build_manifest,
     classify,
@@ -51,6 +52,66 @@ def _parse_sqlite_queries(
             _die(parser, f"--sqlite-query expects DATABASE=SQL, got {entry!r}")
         queries.append((database.strip(), query.strip()))
     return queries
+
+
+def _parse_hint_spec(parser: argparse.ArgumentParser, spec: str) -> dict[str, bool]:
+    hints: dict[str, bool] = {}
+    for item in spec.split(","):
+        item = item.strip()
+        if not item:
+            continue
+        name, separator, raw = item.partition(":")
+        name = name.strip()
+        raw = raw.strip().lower()
+        if not separator or name not in HINT_NAMES:
+            _die(
+                parser,
+                f"unknown effect hint {name!r}",
+                hint=(
+                    f"valid hints: {', '.join(HINT_NAMES)}; "
+                    "expected TOOL=hint:true|false, hint:true|false"
+                ),
+            )
+        if raw not in {"true", "false"}:
+            _die(parser, f"hint {name} must be true or false, got {raw!r}")
+        hints[name] = raw == "true"
+    if not hints:
+        _die(parser, f"empty contract: expected hint:true|false, got {spec!r}")
+    return hints
+
+
+def _parse_contracts(
+    parser: argparse.ArgumentParser, entries: list[str]
+) -> dict[str, dict[str, bool]]:
+    contracts: dict[str, dict[str, bool]] = {}
+    for entry in entries:
+        tool, separator, spec = entry.partition("=")
+        if not separator or not tool.strip():
+            _die(
+                parser,
+                f"--contract expects TOOL=hint:value,..., got {entry!r}",
+                hint="for example --contract list_tables=readOnlyHint:true",
+            )
+        contracts[tool.strip()] = _parse_hint_spec(parser, spec)
+    return contracts
+
+
+def _add_contract_options(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--contract",
+        action="append",
+        default=[],
+        metavar="TOOL=HINT:VALUE",
+        help=(
+            "declare an effect hint for one tool, for servers that publish no "
+            "annotations (repeatable; comma-separate several hints)"
+        ),
+    )
+    parser.add_argument(
+        "--contract-all",
+        metavar="HINT:VALUE",
+        help="declare the same policy for every tool; --contract overrides it per tool",
+    )
 
 
 def _add_scan_options(parser: argparse.ArgumentParser, *, required_out: bool) -> None:
@@ -133,6 +194,7 @@ def build_parser(prog: str = "safesink") -> argparse.ArgumentParser:
         type=float,
         help="stop issuing calls after this many seconds and report the rest as unverified",
     )
+    _add_contract_options(check)
     check.add_argument("--protocol-version", default="2025-11-25")
     check.add_argument("--startup-timeout", type=float, default=60.0)
     check.add_argument(
@@ -179,6 +241,7 @@ def build_parser(prog: str = "safesink") -> argparse.ArgumentParser:
         help="also generate cases for tools declaring destructiveHint (sandbox only)",
     )
     scan.add_argument("--setup-command", nargs="+")
+    _add_contract_options(scan)
     scan.add_argument(
         "--dry-run",
         action="store_true",
@@ -259,6 +322,12 @@ def main(argv: list[str] | None = None, prog: str = "safesink") -> int:
         manifest_path = Path(arguments.manifest_out or (sandbox / "manifest.json"))
         server_env = _parse_env(parser, arguments.env)
         sqlite_queries = _parse_sqlite_queries(parser, arguments.sqlite_query)
+        contracts = _parse_contracts(parser, arguments.contract)
+        contract_all = (
+            _parse_hint_spec(parser, arguments.contract_all)
+            if arguments.contract_all
+            else None
+        )
         try:
             tools, server_info = list_server_tools(
                 arguments.command,
@@ -310,6 +379,8 @@ def main(argv: list[str] | None = None, prog: str = "safesink") -> int:
                 include_sandbox_observer=arguments.sandbox_observer,
                 capture_stderr=arguments.capture_stderr,
                 dry_run=arguments.dry_run,
+                contracts=contracts,
+                contract_all=contract_all,
             )
             write_manifest(manifest, manifest_path)
             if arguments.dry_run:
@@ -365,6 +436,11 @@ def main(argv: list[str] | None = None, prog: str = "safesink") -> int:
                     "cases": len(report["cases"]),
                     "toolCoverage": report["coverage"]["ratio"],
                     "observers": [item["kind"] for item in report.get("observers", [])],
+                    "declarationSource": (
+                        "manifest-contract"
+                        if (contracts or contract_all)
+                        else "mcp-tool-annotation"
+                    ),
                     "inconclusive": sum(
                         1 for case in report["cases"] if case.get("inconclusive")
                     ),
@@ -410,6 +486,12 @@ def main(argv: list[str] | None = None, prog: str = "safesink") -> int:
     observer_root = Path(arguments.observer_root)
     observer_root.mkdir(parents=True, exist_ok=True)
     server_env = _parse_env(parser, arguments.env)
+    contracts = _parse_contracts(parser, arguments.contract)
+    contract_all = (
+        _parse_hint_spec(parser, arguments.contract_all)
+        if arguments.contract_all
+        else None
+    )
     try:
         tools, server_info = list_server_tools(
             arguments.command,
@@ -431,6 +513,8 @@ def main(argv: list[str] | None = None, prog: str = "safesink") -> int:
             env=server_env,
             protocol_version=arguments.protocol_version,
             dry_run=arguments.dry_run,
+            contracts=contracts,
+            contract_all=contract_all,
         )
     except (ScanError, McpClientError) as error:
         _die(parser, str(error), hint="the server must speak MCP over stdio")
