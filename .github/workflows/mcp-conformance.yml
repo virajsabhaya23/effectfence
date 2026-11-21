@@ -2,17 +2,25 @@ name: mcp-conformance
 on:
   push:
   pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mcp-conformance-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   fixture-conformance:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
-      - name: Run EffectFence against the passing MCP fixture
+      - name: Run SafeSink against the passing MCP fixture
         uses: ./
         with:
           manifest: examples/mcp-conformance/passing.json
@@ -23,5 +31,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: effectfence-mcp-conformance
+          name: safesink-mcp-conformance
           path: out/mcp/
+          if-no-files-found: warn
+          retention-days: 14

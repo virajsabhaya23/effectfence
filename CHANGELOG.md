@@ -27,6 +27,13 @@ All notable changes will be documented here. This project follows Semantic Versi
   `safesink.__version__`.
 - The unit suite now imports `safesink` directly; only the compatibility test
   exercises the deprecated `effectfence` alias.
+- CI is verified to stay within a free GitHub account: public-repo standard
+  `ubuntu-latest` runners only, read-only workflow permissions, per-job timeouts,
+  a single benchmark artifact, 7-14 day artifact retention (the Free plan shares
+  500 MB of artifact storage), and manual `workflow_dispatch` entry points. A new
+  `tests/test_ci_free_tier.py` fails on macOS/Windows/larger runners, merge-queue
+  triggers, CodeQL/Pages uploads, missing timeouts, missing permissions, or
+  unbounded artifact retention. PyPI release metadata now names `safesink`.
 - CI runs the gates and suite on Python 3.10, 3.12, and 3.13, and a separate job
   builds the wheel, installs it into a fresh virtual environment, and runs
   `safesink --version` plus the safe and unsafe fixtures through the installed

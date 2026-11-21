@@ -3,6 +3,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -47,7 +48,7 @@ jobs:
       - name: Benchmark corpus (30 cases)
         run: python -m safesink benchmark benchmark/corpus.json --out benchmark/results.json
       - name: Keep benchmark results
-        if: always()
+        if: always() && matrix.python-version == '3.12'
         uses: actions/upload-artifact@v7
         with:
           name: benchmark-results-py${{ matrix.python-version }}
