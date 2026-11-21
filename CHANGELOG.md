@@ -27,6 +27,11 @@ All notable changes will be documented here. This project follows Semantic Versi
   `safesink.__version__`.
 - The unit suite now imports `safesink` directly; only the compatibility test
   exercises the deprecated `effectfence` alias.
+- CI runs the gates and suite on Python 3.10, 3.12, and 3.13, and a separate job
+  builds the wheel, installs it into a fresh virtual environment, and runs
+  `safesink --version` plus the safe and unsafe fixtures through the installed
+  console script. A test also asserts `pyproject.toml`'s version matches
+  `safesink.__version__`.
 
 - Added an observer non-interference control schedule. Every MCP case (and every
   ambiguous-result trial) now runs matched no-tool observation rounds using the

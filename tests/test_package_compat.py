@@ -4,9 +4,15 @@ import contextlib
 import importlib
 import io
 import pkgutil
+import re
 import unittest
 import warnings
 from pathlib import Path
+
+try:
+    import tomllib
+except ModuleNotFoundError:  # Python 3.10 has no tomllib
+    tomllib = None
 
 import effectfence
 import safesink
@@ -24,6 +30,22 @@ ALIASED_MODULES = sorted(
 
 def public_names(module: object) -> list[str]:
     return sorted(name for name in vars(module) if not name.startswith("_"))
+
+
+def project_version() -> str:
+    text = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    if tomllib is not None:
+        return str(tomllib.loads(text)["project"]["version"])
+    section = text.split("[project]", 1)[1]
+    match = re.search(r'^version = "([^"]+)"', section, re.MULTILINE)
+    if match is None:
+        raise AssertionError("pyproject.toml has no [project] version")
+    return match.group(1)
+
+
+class VersionTests(unittest.TestCase):
+    def test_pyproject_version_matches_the_package(self) -> None:
+        self.assertEqual(project_version(), safesink.__version__)
 
 
 class DeprecatedAliasTests(unittest.TestCase):
