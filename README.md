@@ -15,6 +15,20 @@ One command, no manifest, no server changes:
 safesink mcp-check -- npx -y @modelcontextprotocol/server-filesystem "$PWD/sandbox"
 ```
 
+Nothing to install? Lint it instead. `safesink lint` reads `tools/list` and
+stops: no `tools/call`, no observer, no sandbox.
+
+```bash
+safesink lint -- npx -y @modelcontextprotocol/server-filesystem "$PWD/sandbox"
+```
+
+It reports annotation problems (a write verb under `readOnlyHint: true`, a
+delete verb under `destructiveHint: false`, contradictory hints, an idempotent
+claim with a timestamp argument) with an annotation score. Every rule, its
+rationale and its false-positive caveat are in
+[docs/LINT_RULES.md](docs/LINT_RULES.md). A lint pass is not a certification;
+it tells you whether a server is worth verifying.
+
 ## Install
 
 ```bash
