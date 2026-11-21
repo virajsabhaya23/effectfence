@@ -224,6 +224,16 @@ pin a released commit or tag:
 Pin a full commit SHA in high-assurance environments. Preserve the JSON report
 as a CI artifact and use the process exit code as the merge gate.
 
+## Bounding a run
+
+Per-call timeouts do not bound a whole scan: a 60-tool server that hangs on
+every call takes 60 x `requestTimeoutSeconds`. Pass `--timeout SECONDS` to
+`mcp-check` or `mcp-verify`, or set `policy.runTimeoutSeconds`, to cap the run.
+When the budget is spent no further call is issued, the cases that were not
+reached are reported with `RUN_BUDGET_EXHAUSTED`, `runBudget` records the limit
+and whether it was hit, and the verdict is `inconclusive` (exit 3) - never a
+finding, because nothing was contradicted.
+
 ## Diagnosing a fatal error
 
 A run that cannot start the server, list its tools, or keep it alive records

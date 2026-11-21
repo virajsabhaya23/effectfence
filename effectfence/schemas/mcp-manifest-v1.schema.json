@@ -82,6 +82,11 @@
           "type": "number",
           "minimum": 0,
           "maximum": 1
+        },
+        "runTimeoutSeconds": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Run-level budget; cases not reached are reported as RUN_BUDGET_EXHAUSTED."
         }
       }
     }

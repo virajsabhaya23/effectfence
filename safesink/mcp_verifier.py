@@ -46,7 +46,10 @@ def load_manifest(path: str | Path) -> tuple[dict[str, Any], Path]:
 
 
 def verify_manifest(
-    path: str | Path, *, capture_stderr: bool = False
+    path: str | Path,
+    *,
+    capture_stderr: bool = False,
+    timeout_seconds: float | None = None,
 ) -> dict[str, Any]:
     # Imported lazily: this module is imported while ``safesink/__init__`` runs,
     # so the package version does not exist yet at module-import time.
@@ -77,7 +80,14 @@ def verify_manifest(
         }
         for item in manifest.get("observers", [])
     ]
+    budget = timeout_seconds
+    if budget is None:
+        declared_budget = manifest.get("policy", {}).get("runTimeoutSeconds")
+        budget = float(declared_budget) if declared_budget is not None else None
+    if budget is not None and budget <= 0:
+        raise ManifestError("run timeout must be positive")
     started = time.time()
+    budget_exhausted = False
     results: list[dict[str, Any]] = []
     # A fatal error has to say where it happened: a 40-case scan that dies on
     # case 31 should not read like one that never started.
@@ -101,8 +111,18 @@ def verify_manifest(
         tools = client.list_tools(max_pages=int(server.get("maxListPages", 100)))
         indexed_tools = {tool["name"]: tool for tool in tools}
         phase = "case"
-        for case in manifest["cases"]:
+        for index, case in enumerate(manifest["cases"]):
             current_case = case["id"]
+            # One hanging tool must not stall a CI gate for timeout x cases. When
+            # the budget is spent, the remaining cases are reported as unverified
+            # rather than silently dropped.
+            if budget is not None and time.time() - started > budget:
+                budget_exhausted = True
+                results.extend(
+                    _unbudgeted_case(remaining)
+                    for remaining in manifest["cases"][index:]
+                )
+                break
             results.append(
                 _run_case(
                     case,
@@ -196,12 +216,43 @@ def verify_manifest(
         },
         "policyViolations": policy_violations,
         "fatalError": fatal_error,
+        "runBudget": {
+            "timeoutSeconds": budget,
+            "exhausted": budget_exhausted,
+        },
         "observers": observer_summary,
         "cases": results,
         "limitations": _limitations(observer_summary),
     }
     report["certificateSha256"] = canonical_digest(report)
     return report
+
+
+def _unbudgeted_case(case: dict[str, Any]) -> dict[str, Any]:
+    """A case the run never reached because the time budget was spent."""
+    return {
+        "id": case["id"],
+        "tool": case["tool"],
+        "argumentShapeSha256": canonical_digest(
+            _value_shape(case.get("arguments", {}))
+        ),
+        "argumentKeys": sorted(case.get("arguments", {})),
+        "passed": False,
+        "durationMs": 0,
+        "declarations": {},
+        "calls": [],
+        "deltas": {"firstCall": [], "retry": []},
+        "violations": [],
+        "inconclusive": [
+            {
+                "code": "RUN_BUDGET_EXHAUSTED",
+                "message": (
+                    "the run-level time budget was spent before this case ran; "
+                    "raise --timeout or policy.runTimeoutSeconds to verify it"
+                ),
+            }
+        ],
+    }
 
 
 def _limitations(observers: list[dict[str, Any]]) -> list[str]:
@@ -869,9 +920,19 @@ def _validate_manifest(manifest: dict[str, Any]) -> None:
                 raise ManifestError(
                     f"case {case_id!r} ambiguousResultFault.timeoutMs must be positive"
                 )
-    minimum = manifest.get("policy", {}).get("minimumToolCoverage", 0)
+    policy = manifest.get("policy", {})
+    if not isinstance(policy, dict):
+        raise ManifestError("policy must be an object")
+    minimum = policy.get("minimumToolCoverage", 0)
     if not isinstance(minimum, (int, float)) or isinstance(minimum, bool) or not 0 <= minimum <= 1:
         raise ManifestError("policy.minimumToolCoverage must be between 0 and 1")
+    run_timeout = policy.get("runTimeoutSeconds")
+    if run_timeout is not None and (
+        not isinstance(run_timeout, (int, float))
+        or isinstance(run_timeout, bool)
+        or run_timeout <= 0
+    ):
+        raise ManifestError("policy.runTimeoutSeconds must be a positive number")
 
 
 def _command(value: Any, label: str) -> list[str]:
