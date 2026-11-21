@@ -23,7 +23,19 @@ class BuildBackendTests(unittest.TestCase):
                     "safesink-0.3.0.dist-info/entry_points.txt"
                 ).decode()
         self.assertIn("safesink = safesink.cli:main", entry_points)
+        self.assertIn("safesink-legacy = safesink.legacy.cli:main", entry_points)
         self.assertIn("effectfence = effectfence.cli:main", entry_points)
+
+    def test_metadata_points_at_the_real_repository(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            wheel = Path(directory) / build_backend.build_wheel(directory)
+            with zipfile.ZipFile(wheel) as archive:
+                metadata = archive.read("safesink-0.3.0.dist-info/METADATA").decode()
+        self.assertIn(
+            "Project-URL: Repository, https://github.com/virajsabhaya23/effectfence",
+            metadata,
+        )
+        self.assertNotIn("virajsabhaya23/safesink", metadata)
 
     def test_wheel_is_reproducible_and_contains_schema_and_license(self) -> None:
         with tempfile.TemporaryDirectory() as first, tempfile.TemporaryDirectory() as second:
@@ -39,6 +51,7 @@ class BuildBackendTests(unittest.TestCase):
                 self.assertIn(
                     "safesink/schemas/mcp-manifest-v1.schema.json", names
                 )
+                self.assertIn("safesink/legacy/simulator.py", names)
                 self.assertIn("safesink-0.3.0.dist-info/LICENSE", names)
                 metadata = archive.read("safesink-0.3.0.dist-info/METADATA")
                 self.assertIn(b"Version: 0.3.0", metadata)

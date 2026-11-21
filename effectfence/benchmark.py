@@ -1,3 +1,3 @@
-"""Deprecated alias of :mod:`safesink.benchmark` (EffectFence compatibility shim)."""
+"""Deprecated alias of :mod:`safesink.legacy.benchmark` (EffectFence compatibility shim)."""
 
-from safesink.benchmark import *  # noqa: F401,F403
+from safesink.legacy.benchmark import *  # noqa: F401,F403

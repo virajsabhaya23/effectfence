@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from safesink.live import (
+from safesink.legacy.live import (
     LiveConfig,
     append_trace,
     evaluate_live_evidence,

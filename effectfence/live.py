@@ -1,3 +1,3 @@
-"""Deprecated alias of :mod:`safesink.live` (EffectFence compatibility shim)."""
+"""Deprecated alias of :mod:`safesink.legacy.live` (EffectFence compatibility shim)."""
 
-from safesink.live import *  # noqa: F401,F403
+from safesink.legacy.live import *  # noqa: F401,F403

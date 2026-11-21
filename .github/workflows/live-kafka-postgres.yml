@@ -55,7 +55,7 @@ jobs:
       - run: python -m pip install ".[live-kafka-postgres]"
       - name: Verify EffectFence stable identity
         run: >-
-          effectfence live-kafka-postgres
+          safesink-legacy live-kafka-postgres
           --strategy effectfence
           --expect safe
           --run-id ci-safe
@@ -63,7 +63,7 @@ jobs:
           --timeout 120
       - name: Prove the naive retry control duplicates the effect
         run: >-
-          effectfence live-kafka-postgres
+          safesink-legacy live-kafka-postgres
           --strategy naive
           --expect unsafe
           --run-id ci-naive-control
