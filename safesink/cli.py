@@ -9,6 +9,7 @@ from pathlib import Path
 
 from . import __version__
 from .mcp_client import McpClientError
+from .mcp_lint import lint_manifest, lint_tools
 from .mcp_reports import write_json_report, write_junit_report, write_sarif_report
 from .mcp_scan import (
     HINT_NAMES,
@@ -18,7 +19,7 @@ from .mcp_scan import (
     list_server_tools,
     write_manifest,
 )
-from .mcp_verifier import ManifestError, verify_manifest
+from .mcp_verifier import ManifestError, load_manifest, verify_manifest
 
 
 def _die(parser: argparse.ArgumentParser, message: str, *, hint: str | None = None) -> None:
@@ -213,6 +214,36 @@ def build_parser(prog: str = "safesink") -> argparse.ArgumentParser:
         help="stdio command that starts the server; place it after ' -- '",
     )
 
+    lint = commands.add_parser(
+        "lint",
+        help="check a server's annotations statically, without calling any tool",
+    )
+    lint.add_argument(
+        "--manifest",
+        help="lint the contracts in a manifest instead of starting a server",
+    )
+    lint.add_argument("--json", action="store_true", dest="as_json", help="print JSON")
+    lint.add_argument(
+        "--min-annotation-score",
+        type=float,
+        help="exit 2 when the annotation score is below this value (0-100)",
+    )
+    lint.add_argument("--inherit-env", nargs="+", default=["HOME"])
+    lint.add_argument(
+        "--env",
+        action="append",
+        default=[],
+        metavar="KEY=VALUE",
+        help="environment variable for the server (repeatable)",
+    )
+    lint.add_argument("--protocol-version", default="2025-11-25")
+    lint.add_argument("--startup-timeout", type=float, default=60.0)
+    lint.add_argument(
+        "command",
+        nargs="*",
+        help="stdio command that starts the server; place it after ' -- '",
+    )
+
     mcp = commands.add_parser(
         "mcp-verify", help="verify MCP tool annotations against observed effects"
     )
@@ -313,6 +344,21 @@ def _print_plan(plan: list[dict]) -> None:
             f"  arguments: {json.dumps(item.get('arguments', {}), sort_keys=True)}",
             file=sys.stderr,
         )
+
+
+def _print_lint(result: dict) -> None:
+    print(
+        f"annotation score {result['score']['value']}/{result['score']['max']} "
+        f"over {result['toolsAdvertised']} tools",
+        file=sys.stderr,
+    )
+    for finding in result["findings"]:
+        print(
+            f"  {finding['tool']}: {finding['code']} - {finding['message']}",
+            file=sys.stderr,
+        )
+    if not result["findings"]:
+        print("  no annotation problems found", file=sys.stderr)
 
 
 def _print_case_verdicts(report: dict) -> None:
@@ -478,6 +524,55 @@ def main(argv: list[str] | None = None, prog: str = "safesink") -> int:
         if _below_min_score(report, arguments.min_score):
             return 2
         return _exit_code(report)
+
+    if arguments.cmd == "lint":
+        if arguments.manifest:
+            try:
+                manifest, _ = load_manifest(arguments.manifest)
+            except ManifestError as error:
+                _die(parser, str(error), hint="see docs/MCP_CONFORMANCE.md#manifest")
+                return 2
+            except FileNotFoundError:
+                _die(parser, f"manifest not found: {arguments.manifest}")
+                return 2
+            result = lint_manifest(manifest)
+        else:
+            if not arguments.command:
+                _die(
+                    parser,
+                    "lint needs either --manifest FILE or a server command",
+                    hint="safesink lint -- npx -y @modelcontextprotocol/server-filesystem .",
+                )
+                return 2
+            server_env = _parse_env(parser, arguments.env)
+            try:
+                tools, server_info = list_server_tools(
+                    arguments.command,
+                    cwd=Path.cwd(),
+                    inherit_env=arguments.inherit_env,
+                    env=server_env,
+                    protocol_version=arguments.protocol_version,
+                    startup_timeout_seconds=arguments.startup_timeout,
+                )
+            except (ScanError, McpClientError) as error:
+                _die(parser, str(error), hint="the server must speak MCP over stdio")
+                return 2
+            result = lint_tools(tools)
+            result["server"] = server_info.get("name")
+            result["version"] = server_info.get("version")
+        if arguments.as_json:
+            print(json.dumps(result, indent=2, sort_keys=True))
+        else:
+            _print_lint(result)
+        minimum = arguments.min_annotation_score
+        if minimum is not None and result["score"]["value"] < minimum:
+            print(
+                f"safesink: annotation score {result['score']['value']} is below "
+                f"--min-annotation-score {minimum:g}",
+                file=sys.stderr,
+            )
+            return 2
+        return 0
 
     if arguments.cmd == "mcp-verify":
         try:
