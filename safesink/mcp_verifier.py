@@ -183,7 +183,7 @@ def verify_manifest(
         server_metadata = {
             "name": client.server_info.get("name") if client else None,
             "version": client.server_info.get("version") if client else None,
-            "requested_protocol_version": server.get("protocolVersion", "2025-11-25"),
+            "requested_protocol_version": server.get("protocolVersion", "auto"),
             "negotiated_protocol_version": (
                 client.negotiated_protocol_version if client else None
             ),
@@ -515,7 +515,7 @@ def _new_client(
                     "server.allowedHosts",
                 )
             ),
-            protocol_version=str(server.get("protocolVersion", "2025-11-25")),
+            protocol_version=str(server.get("protocolVersion", "auto")),
             timeout_seconds=float(server.get("requestTimeoutSeconds", 30)),
             startup_timeout_seconds=float(server.get("startupTimeoutSeconds", 15)),
             max_response_bytes=int(server.get("maxMessageBytes", 8 * 1024 * 1024)),
@@ -526,7 +526,7 @@ def _new_client(
         environment=environment,
         request_timeout_seconds=float(server.get("requestTimeoutSeconds", 30)),
         startup_timeout_seconds=float(server.get("startupTimeoutSeconds", 15)),
-        protocol_version=str(server.get("protocolVersion", "2025-11-25")),
+        protocol_version=str(server.get("protocolVersion", "auto")),
         max_message_bytes=int(server.get("maxMessageBytes", 8 * 1024 * 1024)),
     )
 

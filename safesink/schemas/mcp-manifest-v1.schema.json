@@ -37,7 +37,9 @@
           "$ref": "#/$defs/stringArray"
         },
         "protocolVersion": {
-          "type": "string"
+          "type": "string",
+          "description": "Protocol revision to speak, or auto to probe server/discover and fall back to the 2025-11-25 handshake.",
+          "examples": ["auto", "2026-07-28", "2025-11-25"]
         },
         "requestTimeoutSeconds": {
           "type": "number",

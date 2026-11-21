@@ -108,7 +108,7 @@ class McpServerTests(unittest.TestCase):
     def test_rules_are_described(self) -> None:
         server = SafeSinkMcpServer(root=self.root)
         payload = json.loads(self.call(server, "describe_rules")["content"][0]["text"])
-        self.assertTrue(any(rule["code"] == "MISSING_READONLY" for rule in payload))
+        self.assertTrue(any(rule["code"] == "MISSING_READONLY" for rule in payload["rules"]))
 
     def test_the_transport_answers_a_batch_of_lines(self) -> None:
         server = SafeSinkMcpServer(root=self.root)
