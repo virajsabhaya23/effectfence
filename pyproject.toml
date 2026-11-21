@@ -42,5 +42,6 @@ Changelog = "https://github.com/virajsabhaya23/effectfence/blob/main/CHANGELOG.m
 
 [project.scripts]
 safesink = "safesink.cli:main"
+safesink-mcp = "safesink.mcp_server:main"
 safesink-legacy = "safesink.legacy.cli:main"
 effectfence = "effectfence.cli:main"

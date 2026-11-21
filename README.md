@@ -361,6 +361,16 @@ measure corpus authoring, not detection of real systems).
 The deprecated `effectfence` import path and console script still work and
 forward to `safesink`.
 
+## Use it from an agent
+
+```bash
+safesink-mcp --root .
+```
+
+Exposes `lint_manifest` and `describe_rules` over MCP. `verify_manifest` (which
+starts the server under test) is only advertised and callable with
+`--allow-exec`. See [`docs/MCP_SERVER.md`](docs/MCP_SERVER.md).
+
 ## Badge
 
 ```bash
