@@ -16,8 +16,10 @@ from .observers import (
     Delta,
     FilesystemObserver,
     HttpJsonObserver,
+    MySqlQueryObserver,
     Observer,
     ObserverError,
+    PostgresQueryObserver,
     Snapshot,
     SqliteQueryObserver,
     canonical_digest,
@@ -1078,6 +1080,20 @@ def _build_observers(items: list[dict[str, Any]], base: Path) -> dict[str, Obser
                 tuple(item.get("parameters", [])),
                 **common,
             )
+        elif item["kind"] in {"postgres-query", "mysql-query"}:
+            observer_class = (
+                PostgresQueryObserver
+                if item["kind"] == "postgres-query"
+                else MySqlQueryObserver
+            )
+            observer = observer_class(
+                observer_id,
+                str(item["dsnFromEnv"]),
+                item["query"],
+                tuple(item.get("parameters", [])),
+                statement_timeout_ms=int(item.get("statementTimeoutMs", 5000)),
+                **common,
+            )
         elif item["kind"] == "http-json":
             observer = HttpJsonObserver(
                 observer_id,
@@ -1202,14 +1218,24 @@ def _validate_manifest(manifest: dict[str, Any]) -> None:
         required = {
             "filesystem": "root",
             "sqlite-query": "database",
+            "postgres-query": "dsnFromEnv",
+            "mysql-query": "dsnFromEnv",
             "http-json": "url",
         }
         if kind not in required:
             raise ManifestError(f"unsupported observer kind: {kind!r}")
         if required[kind] not in item:
             raise ManifestError(f"observer {observer_id!r} requires {required[kind]!r}")
-        if kind == "sqlite-query" and not isinstance(item.get("query"), str):
+        if kind in {"sqlite-query", "postgres-query", "mysql-query"} and not isinstance(
+            item.get("query"), str
+        ):
             raise ManifestError(f"observer {observer_id!r} requires a query")
+        if kind in {"postgres-query", "mysql-query"} and not isinstance(
+            item.get("dsnFromEnv"), str
+        ):
+            raise ManifestError(
+                f"observer {observer_id!r} requires dsnFromEnv (never a literal DSN)"
+            )
         if item.get("world", "closed") not in {"closed", "open"}:
             raise ManifestError("observer world must be 'closed' or 'open'")
     case_ids: set[str] = set()

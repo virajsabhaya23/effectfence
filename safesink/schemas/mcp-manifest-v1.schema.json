@@ -344,6 +344,92 @@
               "type": "boolean"
             }
           }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "kind",
+            "dsnFromEnv",
+            "query"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "kind": {
+              "const": "postgres-query"
+            },
+            "dsnFromEnv": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Name of the environment variable holding the DSN; never a literal DSN."
+            },
+            "query": {
+              "type": "string"
+            },
+            "parameters": {
+              "type": "array"
+            },
+            "statementTimeoutMs": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "world": {
+              "enum": [
+                "closed",
+                "open"
+              ]
+            },
+            "sensitive": {
+              "type": "boolean"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "kind",
+            "dsnFromEnv",
+            "query"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "kind": {
+              "const": "mysql-query"
+            },
+            "dsnFromEnv": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Name of the environment variable holding the DSN; never a literal DSN."
+            },
+            "query": {
+              "type": "string"
+            },
+            "parameters": {
+              "type": "array"
+            },
+            "statementTimeoutMs": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "world": {
+              "enum": [
+                "closed",
+                "open"
+              ]
+            },
+            "sensitive": {
+              "type": "boolean"
+            }
+          }
         }
       ]
     },

@@ -282,29 +282,173 @@ class SqliteQueryObserver:
         )
 
     def diff(self, before: Snapshot, after: Snapshot) -> Delta:
-        before_rows = before.state["rows"]
-        after_rows = after.state["rows"]
-        before_multiset: dict[str, int] = {}
-        after_multiset: dict[str, int] = {}
-        for row in before_rows:
-            key = json.dumps(row, sort_keys=True, separators=(",", ":"))
-            before_multiset[key] = before_multiset.get(key, 0) + 1
-        for row in after_rows:
-            key = json.dumps(row, sort_keys=True, separators=(",", ":"))
-            after_multiset[key] = after_multiset.get(key, 0) + 1
-        removed_row = any(
-            after_multiset.get(key, 0) < count for key, count in before_multiset.items()
-        )
-        return Delta(
-            observer_id=self.observer_id,
-            kind=self.kind,
-            world=self.world,
-            changed=before.digest != after.digest,
-            destructive=removed_row,
-            before_digest=before.digest,
-            after_digest=after.digest,
-            sensitive=self.sensitive,
-        )
+        return _rows_delta(self, before, after)
+
+
+def _rows_delta(observer: Any, before: Snapshot, after: Snapshot) -> Delta:
+    """Compare two row snapshots as multisets, shared by every SQL observer."""
+    before_multiset: dict[str, int] = {}
+    after_multiset: dict[str, int] = {}
+    for row in before.state["rows"]:
+        key = json.dumps(row, sort_keys=True, separators=(",", ":"))
+        before_multiset[key] = before_multiset.get(key, 0) + 1
+    for row in after.state["rows"]:
+        key = json.dumps(row, sort_keys=True, separators=(",", ":"))
+        after_multiset[key] = after_multiset.get(key, 0) + 1
+    # A row that disappeared is destructive; an insert is a change but not a
+    # removal, and a query that does not select it stays invisible.
+    removed_row = any(
+        after_multiset.get(key, 0) < count for key, count in before_multiset.items()
+    )
+    return Delta(
+        observer_id=observer.observer_id,
+        kind=observer.kind,
+        world=observer.world,
+        changed=before.digest != after.digest,
+        destructive=removed_row,
+        before_digest=before.digest,
+        after_digest=after.digest,
+        sensitive=observer.sensitive,
+    )
+
+
+class PostgresQueryObserver:
+    """A read-only row snapshot over an optional psycopg driver.
+
+    The DSN is read from an environment variable named by ``dsn_from_env``: a
+    connection string carries a password, so it must never live in a manifest or
+    a report. Each snapshot runs inside ``BEGIN READ ONLY`` with a statement
+    timeout, so an observer cannot mutate production data by accident.
+    """
+
+    kind = "postgres-query"
+
+    def __init__(
+        self,
+        observer_id: str,
+        dsn_from_env: str,
+        query: str,
+        parameters: tuple[Any, ...] = (),
+        *,
+        statement_timeout_ms: int = 5000,
+        world: str = "closed",
+        sensitive: bool = True,
+    ):
+        if not dsn_from_env:
+            raise ObserverError("postgres observer requires dsnFromEnv")
+        if statement_timeout_ms <= 0:
+            raise ObserverError("statement timeout must be positive")
+        self.observer_id = observer_id
+        self.dsn_from_env = dsn_from_env
+        self.query = query
+        self.parameters = parameters
+        self.statement_timeout_ms = statement_timeout_ms
+        self.world = world
+        self.sensitive = sensitive
+
+    def _dsn(self) -> str:
+        dsn = os.environ.get(self.dsn_from_env)
+        if not dsn:
+            raise ObserverError(
+                f"postgres observer requires environment variable {self.dsn_from_env!r}"
+            )
+        return dsn
+
+    def snapshot(self) -> Snapshot:
+        try:
+            import psycopg  # type: ignore[import-not-found]
+        except ImportError as error:
+            raise ObserverError(
+                "the postgres observer needs psycopg: pip install 'safesink[postgres]'"
+            ) from error
+        try:
+            connection = psycopg.connect(self._dsn())
+        except Exception as error:  # driver errors are not our vocabulary
+            raise ObserverError(
+                f"postgres observer {self.observer_id!r} could not connect "
+                f"({error.__class__.__name__}; details omitted)"
+            ) from error
+        try:
+            connection.autocommit = False
+            with connection.cursor() as cursor:
+                cursor.execute("BEGIN READ ONLY")
+                cursor.execute(
+                    f"SET LOCAL statement_timeout = {int(self.statement_timeout_ms)}"
+                )
+                cursor.execute(self.query, self.parameters or None)
+                columns = [item[0] for item in cursor.description or ()]
+                rows = [[_json_value(value) for value in row] for row in cursor.fetchall()]
+            connection.rollback()
+        except Exception as error:
+            raise ObserverError(
+                f"postgres observer {self.observer_id!r} query failed "
+                f"({error.__class__.__name__}; details omitted)"
+            ) from error
+        finally:
+            connection.close()
+        return _row_snapshot(self, columns, rows)
+
+    def diff(self, before: Snapshot, after: Snapshot) -> Delta:
+        return _rows_delta(self, before, after)
+
+
+class MySqlQueryObserver(PostgresQueryObserver):
+    """The same row snapshot over an optional PyMySQL driver."""
+
+    kind = "mysql-query"
+
+    def snapshot(self) -> Snapshot:
+        try:
+            import pymysql  # type: ignore[import-not-found]
+        except ImportError as error:
+            raise ObserverError(
+                "the mysql observer needs pymysql: pip install 'safesink[mysql]'"
+            ) from error
+        dsn = urllib.parse.urlparse(self._dsn())
+        if not dsn.hostname:
+            raise ObserverError(
+                "the mysql DSN must be a URL: mysql://user:pass@host:3306/database"
+            )
+        try:
+            connection = pymysql.connect(
+                host=dsn.hostname,
+                port=dsn.port or 3306,
+                user=urllib.parse.unquote(dsn.username or ""),
+                password=urllib.parse.unquote(dsn.password or ""),
+                database=dsn.path.lstrip("/") or None,
+            )
+        except Exception as error:
+            raise ObserverError(
+                f"mysql observer {self.observer_id!r} could not connect "
+                f"({error.__class__.__name__}; details omitted)"
+            ) from error
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute("SET SESSION TRANSACTION READ ONLY")
+                cursor.execute(f"SET SESSION MAX_EXECUTION_TIME={int(self.statement_timeout_ms)}")
+                cursor.execute(self.query, self.parameters or None)
+                columns = [item[0] for item in cursor.description or ()]
+                rows = [[_json_value(value) for value in row] for row in cursor.fetchall()]
+        except Exception as error:
+            raise ObserverError(
+                f"mysql observer {self.observer_id!r} query failed "
+                f"({error.__class__.__name__}; details omitted)"
+            ) from error
+        finally:
+            connection.close()
+        return _row_snapshot(self, columns, rows)
+
+
+def _row_snapshot(observer: Any, columns: list[str], rows: list[list[Any]]) -> Snapshot:
+    state = {"columns": columns, "rows": rows}
+    return Snapshot(
+        observer.observer_id,
+        observer.kind,
+        canonical_digest(state),
+        state,
+        observer.world,
+        observer.sensitive,
+    )
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
