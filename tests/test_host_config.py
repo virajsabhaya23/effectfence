@@ -199,6 +199,48 @@ class AuditCommandTests(unittest.TestCase):
             self.assertEqual(verdicts["bad"], "error")
             self.assertEqual(payload["needsAttention"], 1)
 
+    def test_an_unreadable_discovered_config_does_not_hide_a_good_one(self) -> None:
+        from safesink import cli as cli_module
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            script = root / "server.py"
+            script.write_text(HONEST_SERVER, encoding="utf-8")
+            good = root / "good.json"
+            good.write_text(
+                json.dumps(
+                    {"mcpServers": {"ok": {"command": sys.executable, "args": [str(script)]}}}
+                ),
+                encoding="utf-8",
+            )
+            other = root / "other.json"
+            other.write_text(json.dumps({"theme": "dark"}), encoding="utf-8")
+            stdout = io.StringIO()
+            original = cli_module.existing_config_paths
+            cli_module.existing_config_paths = lambda: [other, good]
+            try:
+                with contextlib.redirect_stdout(stdout):
+                    exit_code = cli_main(["audit", "--out-dir", str(root / "audit")])
+            finally:
+                cli_module.existing_config_paths = original
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(stdout.getvalue())
+            self.assertEqual([row["server"] for row in payload["servers"]], ["ok"])
+            self.assertEqual(len(payload["skippedConfigs"]), 1)
+            self.assertIn("mcpServers", payload["skippedConfigs"][0]["reason"])
+
+    def test_an_explicitly_named_bad_config_fails_loudly(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            bad = root / "bad.json"
+            bad.write_text(json.dumps({"unrelated": True}), encoding="utf-8")
+            errors = io.StringIO()
+            with self.assertRaises(SystemExit) as raised:
+                with contextlib.redirect_stderr(errors):
+                    cli_main(["audit", "--config", str(bad)])
+            self.assertEqual(raised.exception.code, 2)
+            self.assertIn("mcpServers", errors.getvalue())
+
     def test_server_filter_and_markdown_summary(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
