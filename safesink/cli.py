@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import sys
 import tempfile
@@ -10,7 +11,13 @@ from pathlib import Path
 from . import __version__
 from .mcp_client import McpClientError
 from .mcp_lint import lint_manifest, lint_tools
-from .mcp_reports import write_json_report, write_junit_report, write_sarif_report
+from .mcp_reports import (
+    render_markdown_report,
+    write_json_report,
+    write_junit_report,
+    write_markdown_report,
+    write_sarif_report,
+)
 from .mcp_scan import (
     HINT_NAMES,
     ScanError,
@@ -142,6 +149,31 @@ def _add_suppression_options(parser: argparse.ArgumentParser) -> None:
         "--fail-on-suppressed",
         action="store_true",
         help="treat any accepted finding as a failure (high-assurance runs)",
+    )
+
+
+def _write_markdown(parser: argparse.ArgumentParser, report: dict, arguments: Any) -> None:
+    if getattr(arguments, "markdown", None):
+        write_markdown_report(report, arguments.markdown)
+    if getattr(arguments, "github_summary", False):
+        target = os.environ.get("GITHUB_STEP_SUMMARY")
+        if not target:
+            _die(
+                parser,
+                "--github-summary needs GITHUB_STEP_SUMMARY to be set",
+                hint="this flag only works inside a GitHub Actions step",
+            )
+            return
+        with open(target, "a", encoding="utf-8") as stream:
+            stream.write(render_markdown_report(report) + "\n")
+
+
+def _add_report_options(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--markdown", help="Markdown report path for a review comment")
+    parser.add_argument(
+        "--github-summary",
+        action="store_true",
+        help="also append the Markdown report to GITHUB_STEP_SUMMARY",
     )
 
 
@@ -278,6 +310,7 @@ def build_parser(prog: str = "safesink") -> argparse.ArgumentParser:
     _add_baseline_options(check)
     _add_suppression_options(check)
     _add_isolation_options(check)
+    _add_report_options(check)
     check.add_argument("--protocol-version", default="2025-11-25")
     check.add_argument("--startup-timeout", type=float, default=60.0)
     check.add_argument(
@@ -338,6 +371,7 @@ def build_parser(prog: str = "safesink") -> argparse.ArgumentParser:
     _add_baseline_options(mcp)
     _add_suppression_options(mcp)
     _add_isolation_options(mcp)
+    _add_report_options(mcp)
     mcp.add_argument("--verbose", action="store_true", help="print per-case verdicts")
     mcp.add_argument(
         "--capture-stderr",
@@ -590,6 +624,7 @@ def main(argv: list[str] | None = None, prog: str = "safesink") -> int:
             write_junit_report(report, arguments.junit)
         if arguments.sarif:
             write_sarif_report(report, arguments.sarif)
+        _write_markdown(parser, report, arguments)
         print(
             json.dumps(
                 {
@@ -699,6 +734,7 @@ def main(argv: list[str] | None = None, prog: str = "safesink") -> int:
             write_junit_report(report, arguments.junit)
         if arguments.sarif:
             write_sarif_report(report, arguments.sarif)
+        _write_markdown(parser, report, arguments)
         summary = {
             "verdict": report["verdict"],
             "cases": len(report["cases"]),

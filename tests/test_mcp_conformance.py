@@ -17,6 +17,7 @@ import contextlib
 import io
 from safesink.mcp_client import restricted_environment
 from safesink.mcp_reports import (
+    render_markdown_report,
     write_junit_report,
     write_sarif_report,
 )
@@ -629,6 +630,49 @@ class McpConformanceTests(unittest.TestCase):
             )
             with self.assertRaises(ManifestError):
                 load_manifest(path)
+
+    def test_markdown_report_names_every_dishonest_tool(self) -> None:
+        path = ROOT / "examples" / "mcp-conformance" / "failing.json"
+        report = verify_manifest(path)
+        markdown = render_markdown_report(report)
+        self.assertIn("SafeSink: ❌ FAIL", markdown)
+        for tool in ("lying_read", "append_audit", "delete_note"):
+            self.assertIn(tool, markdown)
+        self.assertIn("**Score:** 35/100", markdown)
+        self.assertIn(report["certificateSha256"], markdown)
+        self.assertIn("not a security certification", markdown)
+
+    def test_markdown_and_github_summary_are_written(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = self.manifest(
+                root,
+                [{"id": "read", "tool": "read_note", "arguments": {}}],
+            )
+            markdown_path = root / "report.md"
+            summary_path = root / "summary.md"
+            previous = os.environ.get("GITHUB_STEP_SUMMARY")
+            os.environ["GITHUB_STEP_SUMMARY"] = str(summary_path)
+            try:
+                exit_code = cli_main(
+                    [
+                        "mcp-verify",
+                        str(path),
+                        "--out",
+                        str(root / "report.json"),
+                        "--markdown",
+                        str(markdown_path),
+                        "--github-summary",
+                    ]
+                )
+            finally:
+                if previous is None:
+                    os.environ.pop("GITHUB_STEP_SUMMARY", None)
+                else:
+                    os.environ["GITHUB_STEP_SUMMARY"] = previous
+            self.assertEqual(exit_code, 0)
+            self.assertIn("SafeSink: ✅ PASS", markdown_path.read_text())
+            self.assertIn("SafeSink: ✅ PASS", summary_path.read_text())
 
     def test_reports_are_valid_xml_and_sarif(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

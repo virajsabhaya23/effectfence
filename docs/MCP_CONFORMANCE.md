@@ -248,6 +248,16 @@ SHA-256, and the JUnit report carries `baselineSuppressedCount` plus one
 baseline that was merely inconclusive cannot hide a violation the new run found:
 that violation is new.
 
+## Showing the result in a pull request
+
+SARIF only surfaces with code scanning enabled, JUnit only in the checks tab,
+and JSON is an artifact nobody opens. `--markdown report.md` writes a reviewable
+summary: verdict banner, score, coverage, a findings table (tool, case, code,
+declaration, observed), an inconclusive table with reasons, the observed
+boundary, baseline and suppression counts, and the certificate digest.
+`--github-summary` appends the same Markdown to `GITHUB_STEP_SUMMARY`, so the
+reason for a red build is on the run page without downloading anything.
+
 ## Isolating cases
 
 One server process runs every case by default. `setup` hooks reset external
