@@ -16,6 +16,7 @@ from safesink.mcp_scan import (
     PROBE_URL,
     ScanError,
     _role,
+    _wants_directory,
     build_manifest,
     classify,
     synthesize_arguments,
@@ -211,6 +212,45 @@ class SynthesizeArgumentTests(unittest.TestCase):
         )
         for name in ("profile_id", "target_language", "source_language", "target_audience"):
             self.assertEqual(arguments[name], PROBE_STRING)
+
+    def test_search_tools_receive_the_seeded_directory(self) -> None:
+        schema = {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Directory to search for files",
+                }
+            },
+            "required": ["path"],
+        }
+        arguments = synthesize_arguments(
+            schema, sandbox="/sandbox", tool_name="search_files"
+        )
+        self.assertEqual(arguments["path"], "/sandbox")
+        self.assertTrue(
+            _wants_directory("path", "Directory to search for files", "search_files")
+        )
+        self.assertTrue(_wants_directory("path", "Directory to list", "list_directory"))
+
+    def test_file_tools_still_receive_a_file(self) -> None:
+        # Filesystem servers repeat "allowed directories" in file descriptions;
+        # that boilerplate must not turn a file argument into a directory.
+        self.assertFalse(
+            _wants_directory(
+                "path",
+                "Read the complete contents of a file. Only works within allowed "
+                "directories.",
+                "read_text_file",
+            )
+        )
+        self.assertFalse(
+            _wants_directory("path", "Write content to a file", "write_file")
+        )
+
+    def test_explicit_directory_names_always_win(self) -> None:
+        for name in ("dir", "directory", "folder_path", "root_path", "dir_path"):
+            self.assertTrue(_wants_directory(name, "A file", "write_file"), name)
 
     def test_short_role_words_do_not_create_destinations(self) -> None:
         for name in ("token_file", "timeout_path", "total", "timestamp_path"):
