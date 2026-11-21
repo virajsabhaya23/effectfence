@@ -16,7 +16,10 @@ def write_json_report(report: dict[str, Any], path: str | Path) -> None:
 
 def write_junit_report(report: dict[str, Any], path: str | Path) -> None:
     cases = report.get("cases", [])
-    failures = sum(1 for case in cases if not case.get("passed"))
+    failures = sum(1 for case in cases if case.get("violations"))
+    skipped = sum(
+        1 for case in cases if not case.get("violations") and case.get("inconclusive")
+    )
     has_policy_failure = bool(report.get("fatalError") or report.get("policyViolations"))
     if has_policy_failure:
         failures += 1
@@ -33,6 +36,7 @@ def write_junit_report(report: dict[str, Any], path: str | Path) -> None:
             "tests": str(total_tests),
             "failures": str(failures),
             "errors": "0",
+            "skipped": str(skipped),
             "time": f"{suite_time:.3f}",
         },
     )
@@ -51,13 +55,25 @@ def write_junit_report(report: dict[str, Any], path: str | Path) -> None:
                 "time": f"{float(case.get('durationMs', 0)) / 1000:.3f}",
             },
         )
-        if not case.get("passed"):
+        if case.get("violations"):
             failure = ET.SubElement(
                 node,
                 "failure",
                 {"message": _failure_summary(case.get("violations", []))},
             )
             failure.text = json.dumps(case.get("violations", []), indent=2)
+        elif case.get("inconclusive"):
+            skipping = ET.SubElement(
+                node,
+                "skipped",
+                {
+                    "message": ", ".join(
+                        str(item.get("code", "inconclusive"))
+                        for item in case["inconclusive"]
+                    )[:500]
+                },
+            )
+            skipping.text = json.dumps(case["inconclusive"], indent=2)
     infrastructure = []
     if report.get("fatalError"):
         infrastructure.append(

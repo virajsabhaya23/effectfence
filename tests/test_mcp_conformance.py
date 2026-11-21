@@ -12,7 +12,6 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib.resources import files
 from pathlib import Path
 
-from safesink.citation import citation
 from safesink.mcp_client import restricted_environment
 from safesink.mcp_reports import (
     write_junit_report,
@@ -54,7 +53,7 @@ class McpConformanceTests(unittest.TestCase):
                 }
             ],
             "cases": normalized,
-            "policy": {"minimumToolCoverage": len(cases) / 5},
+            "policy": {"minimumToolCoverage": min(1.0, len(cases) / 6)},
         }
         path = root / "manifest.json"
         path.write_text(json.dumps(manifest), encoding="utf-8")
@@ -103,6 +102,51 @@ class McpConformanceTests(unittest.TestCase):
             self.assertIn("READ_ONLY_HINT_MISMATCH", codes)
             self.assertIn("IDEMPOTENT_HINT_MISMATCH", codes)
             self.assertIn("NON_DESTRUCTIVE_HINT_MISMATCH", codes)
+
+    def test_rejected_generated_arguments_are_inconclusive_not_findings(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            report = verify_manifest(
+                self.manifest(
+                    Path(directory),
+                    [
+                        {
+                            "id": "generated",
+                            "tool": "read_missing_file",
+                            "arguments": {"path": "nope.txt"},
+                            "generatedArguments": True,
+                        }
+                    ],
+                )
+            )
+            case = report["cases"][0]
+        self.assertEqual(case["violations"], [])
+        self.assertIn(
+            "TOOL_ERROR_ON_GENERATED_ARGUMENTS",
+            [item["code"] for item in case["inconclusive"]],
+        )
+        self.assertFalse(case["passed"])
+        self.assertEqual(report["verdict"], "inconclusive")
+
+    def test_rejected_hand_written_arguments_are_still_a_finding(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            report = verify_manifest(
+                self.manifest(
+                    Path(directory),
+                    [
+                        {
+                            "id": "hand-written",
+                            "tool": "read_missing_file",
+                            "arguments": {"path": "nope.txt"},
+                        }
+                    ],
+                )
+            )
+            case = report["cases"][0]
+        self.assertEqual(
+            [item["code"] for item in case["violations"]],
+            ["TOOL_ERROR_EXPECTATION_MISMATCH"],
+        )
+        self.assertEqual(report["verdict"], "fail")
 
     def test_reports_are_valid_xml_and_sarif(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -218,7 +262,7 @@ class McpConformanceTests(unittest.TestCase):
             )
             self.assertTrue(case["passed"])
 
-    def test_snapshot_induced_state_change_is_interference_not_a_tool_violation(self) -> None:
+    def test_snapshot_induced_state_change_is_inconclusive_not_a_tool_violation(self) -> None:
         # An observed endpoint that mutates on every read: the change is reproducible
         # without any tool call, so it must never be blamed on the tool.
         counter = {"value": 0}
@@ -265,7 +309,7 @@ class McpConformanceTests(unittest.TestCase):
                 # the change is not attributable, so no hint violation is raised.
                 self.assertEqual(case["violations"], [])
                 self.assertFalse(case["passed"])
-                self.assertEqual(report["verdict"], "fail")
+                self.assertEqual(report["verdict"], "inconclusive")
         finally:
             server.shutdown()
             server.server_close()
@@ -350,7 +394,7 @@ class McpConformanceTests(unittest.TestCase):
             value["server"]["env"]["EFFECTFENCE_FIXTURE_PAGINATE"] = "1"
             path.write_text(json.dumps(value))
             report = verify_manifest(path)
-            self.assertEqual(report["coverage"]["listedTools"], 5)
+            self.assertEqual(report["coverage"]["listedTools"], 6)
             self.assertEqual(report["verdict"], "pass")
 
     def test_manifest_rejects_unknown_observer(self) -> None:
@@ -451,10 +495,6 @@ class McpConformanceTests(unittest.TestCase):
         )
         self.assertEqual(schema["properties"]["schemaVersion"]["const"], "effectfence.mcp.v1")
 
-    def test_citations_are_copy_ready(self) -> None:
-        self.assertIn("@software", citation("bibtex"))
-        self.assertIn("cff-version: 1.2.0", citation("cff"))
-        self.assertEqual(json.loads(citation("json"))["type"], "software")
 
 
 if __name__ == "__main__":

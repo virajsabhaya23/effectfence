@@ -132,15 +132,18 @@ def verify_manifest(path: str | Path) -> dict[str, Any]:
             }
         )
 
-    passed = (
-        fatal_error is None
-        and not policy_violations
-        and bool(results)
-        and all(case["passed"] for case in results)
+    # Three outcomes, because "could not verify" is neither a pass nor a finding.
+    failed = (
+        fatal_error is not None
+        or bool(policy_violations)
+        or not results
+        or any(case["violations"] for case in results)
     )
+    unverified = any(case["inconclusive"] for case in results)
+    verdict = "fail" if failed else ("inconclusive" if unverified else "pass")
     report: dict[str, Any] = {
         "schemaVersion": REPORT_SCHEMA,
-        "verdict": "pass" if passed else "fail",
+        "verdict": verdict,
         "generatedAt": _utc_timestamp(started),
         "durationMs": round((time.time() - started) * 1000),
         "manifest": {
@@ -251,18 +254,39 @@ def _run_case(
 
         expect_error = bool(case.get("expectToolError", False))
         tool_error = bool(first_result.get("isError", False))
+        # ``mcp-scan`` synthesizes arguments from a schema it does not own. When
+        # those arguments are rejected, the tool's declared effects were never
+        # exercised: that is a limit of the harness, not a conformance finding.
+        unexercised_arguments = bool(case.get("generatedArguments", False)) and (
+            tool_error and not expect_error
+        )
         if tool_error != expect_error:
-            public["violations"].append(
-                {
-                    "code": "TOOL_ERROR_EXPECTATION_MISMATCH",
-                    "message": f"tools/call isError={tool_error}, expected {expect_error}",
-                }
-            )
+            if unexercised_arguments:
+                public["inconclusive"].append(
+                    {
+                        "code": "TOOL_ERROR_ON_GENERATED_ARGUMENTS",
+                        "message": (
+                            "synthesized arguments were rejected (tools/call isError=true), "
+                            "so declared behavior could not be observed; not counted as a "
+                            "conformance finding"
+                        ),
+                    }
+                )
+            else:
+                public["violations"].append(
+                    {
+                        "code": "TOOL_ERROR_EXPECTATION_MISMATCH",
+                        "message": f"tools/call isError={tool_error}, expected {expect_error}",
+                    }
+                )
 
         attributable_first = [
             delta for delta in first_delta
             if delta.observer_id not in unstable_observers
         ]
+        if unexercised_arguments:
+            public["passed"] = False
+            return _finish_case(public, started)
         _check_first_call(declarations, attributable_first, public)
 
         retry_enabled = bool(case.get("retry", declarations.get("idempotentHint") is True))
@@ -274,14 +298,26 @@ def _run_case(
             public["deltas"]["retry"] = [delta.public() for delta in retry_delta]
             second_error = bool(second_result.get("isError", False))
             if second_error != expect_error:
-                public["violations"].append(
-                    {
-                        "code": "RETRY_TOOL_ERROR_EXPECTATION_MISMATCH",
-                        "message": (
-                            f"retry tools/call isError={second_error}, expected {expect_error}"
-                        ),
-                    }
-                )
+                if second_error and case.get("generatedArguments", False):
+                    public["inconclusive"].append(
+                        {
+                            "code": "RETRY_TOOL_ERROR_ON_GENERATED_ARGUMENTS",
+                            "message": (
+                                "the repeated call with synthesized arguments was rejected "
+                                "(for example because the first call consumed them); not "
+                                "counted as a conformance finding"
+                            ),
+                        }
+                    )
+                else:
+                    public["violations"].append(
+                        {
+                            "code": "RETRY_TOOL_ERROR_EXPECTATION_MISMATCH",
+                            "message": (
+                                f"retry tools/call isError={second_error}, expected {expect_error}"
+                            ),
+                        }
+                    )
             attributable_retry = [
                 delta for delta in retry_delta
                 if delta.observer_id not in unstable_observers
@@ -295,7 +331,9 @@ def _run_case(
                     }
                 )
             _check_first_call(declarations, attributable_retry, public)
-        elif declarations.get("idempotentHint") is not None:
+        elif declarations.get("idempotentHint") is True:
+            # Only a positive idempotency claim needs the retry to be exercised;
+            # idempotentHint=false already expects repeated effects.
             public["inconclusive"].append(
                 {
                     "code": "IDEMPOTENCY_NOT_EXERCISED",

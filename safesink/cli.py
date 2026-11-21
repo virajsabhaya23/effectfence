@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import sys
+import tempfile
 from pathlib import Path
 
 from . import __version__
-from .citation import citation
+from .mcp_client import McpClientError
 from .mcp_reports import write_json_report, write_junit_report, write_sarif_report
 from .mcp_scan import ScanError, build_manifest, list_server_tools, write_manifest
 from .mcp_verifier import ManifestError, verify_manifest
@@ -22,6 +24,14 @@ def _die(parser: argparse.ArgumentParser, message: str, *, hint: str | None = No
     parser.exit(2)
 
 
+def _add_scan_options(parser: argparse.ArgumentParser, *, required_out: bool) -> None:
+    parser.add_argument(
+        "--observer-root", required=True, help="sandbox directory to observe"
+    )
+    if required_out:
+        parser.add_argument("--out", required=True, help="path for the generated manifest")
+
+
 def build_parser(prog: str = "safesink") -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog=prog,
@@ -30,12 +40,42 @@ def build_parser(prog: str = "safesink") -> argparse.ArgumentParser:
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     commands = parser.add_subparsers(dest="cmd", required=True)
 
+    check = commands.add_parser(
+        "mcp-check",
+        help="scan a server and verify it in one step (no manifest needed)",
+    )
+    check.add_argument(
+        "--sandbox",
+        help="directory to observe; defaults to a fresh temporary one",
+    )
+    check.add_argument("--out", default="safesink-mcp-report.json", help="JSON report path")
+    check.add_argument("--junit", help="JUnit XML path")
+    check.add_argument("--sarif", help="SARIF path")
+    check.add_argument("--manifest-out", help="also keep the generated manifest here")
+    check.add_argument(
+        "--include-destructive",
+        action="store_true",
+        help="also call tools declaring destructiveHint (sandbox only)",
+    )
+    check.add_argument("--min-coverage", type=float, default=0.0)
+    check.add_argument("--inherit-env", nargs="+", default=["HOME"])
+    check.add_argument("--protocol-version", default="2025-11-25")
+    check.add_argument("--startup-timeout", type=float, default=60.0)
+    check.add_argument(
+        "--keep-sandbox",
+        action="store_true",
+        help="keep the temporary sandbox for inspection",
+    )
+    check.add_argument(
+        "command",
+        nargs="+",
+        help="stdio command that starts the server; place it after ' -- '",
+    )
+
     mcp = commands.add_parser(
         "mcp-verify", help="verify MCP tool annotations against observed effects"
     )
-    mcp.add_argument(
-        "manifest", help="path to an effectfence.mcp.v1 manifest"
-    )
+    mcp.add_argument("manifest", help="path to an effectfence.mcp.v1 manifest")
     mcp.add_argument(
         "--out", default="safesink-mcp-report.json", help="JSON report path"
     )
@@ -47,8 +87,7 @@ def build_parser(prog: str = "safesink") -> argparse.ArgumentParser:
         "mcp-scan",
         help="generate a conformance manifest from a live server's advertised tools",
     )
-    scan.add_argument("--observer-root", required=True, help="sandbox directory to observe")
-    scan.add_argument("--out", required=True, help="path for the generated manifest")
+    _add_scan_options(scan, required_out=True)
     scan.add_argument("--cwd", default=".")
     scan.add_argument(
         "--include-destructive",
@@ -65,15 +104,93 @@ def build_parser(prog: str = "safesink") -> argparse.ArgumentParser:
         nargs="+",
         help="stdio command that starts the server; place it after ' -- '",
     )
-
-    cite = commands.add_parser("citation", help="print copy-ready citation metadata")
-    cite.add_argument("--format", choices=("bibtex", "cff", "json"), default="bibtex")
     return parser
+
+
+def _exit_code(report: dict) -> int:
+    """0 = verified, 3 = nothing failed but nothing could be verified, 2 = finding."""
+    return {"pass": 0, "inconclusive": 3}.get(str(report.get("verdict")), 2)
+
+
+def _print_case_verdicts(report: dict) -> None:
+    for case in report["cases"]:
+        if case["passed"]:
+            status = "PASS"
+        elif case.get("violations"):
+            status = "FAIL"
+        else:
+            status = "INCONCL"
+        print(f"  {status} {case['id']} ({case['tool']})", file=sys.stderr)
+        for item in case.get("violations", []):
+            print(f"    - {item['code']}: {item.get('message','')}", file=sys.stderr)
+        for item in case.get("inconclusive", []):
+            print(f"    ~ {item['code']}: {item.get('message','')}", file=sys.stderr)
 
 
 def main(argv: list[str] | None = None, prog: str = "safesink") -> int:
     parser = build_parser(prog)
     arguments = parser.parse_args(argv)
+
+    if arguments.cmd == "mcp-check":
+        temporary = arguments.sandbox is None
+        sandbox = (
+            Path(arguments.sandbox)
+            if arguments.sandbox
+            else Path(tempfile.mkdtemp(prefix="safesink-check-"))
+        )
+        sandbox.mkdir(parents=True, exist_ok=True)
+        manifest_path = Path(arguments.manifest_out or (sandbox / "manifest.json"))
+        try:
+            tools, server_info = list_server_tools(
+                arguments.command,
+                cwd=Path.cwd(),
+                inherit_env=arguments.inherit_env,
+                protocol_version=arguments.protocol_version,
+                startup_timeout_seconds=arguments.startup_timeout,
+            )
+            manifest = build_manifest(
+                tools,
+                command=arguments.command,
+                observer_root=str(sandbox),
+                cwd=".",
+                include_destructive=arguments.include_destructive,
+                minimum_tool_coverage=arguments.min_coverage,
+                inherit_env=arguments.inherit_env,
+                protocol_version=arguments.protocol_version,
+            )
+            write_manifest(manifest, manifest_path)
+            report = verify_manifest(manifest_path)
+        except (ScanError, McpClientError, ManifestError) as error:
+            _die(parser, str(error), hint="the server must speak MCP over stdio")
+            return 2
+        finally:
+            if temporary and not arguments.keep_sandbox:
+                shutil.rmtree(sandbox, ignore_errors=True)
+        write_json_report(report, arguments.out)
+        if arguments.junit:
+            write_junit_report(report, arguments.junit)
+        if arguments.sarif:
+            write_sarif_report(report, arguments.sarif)
+        print(
+            json.dumps(
+                {
+                    "server": server_info.get("name"),
+                    "version": server_info.get("version"),
+                    "verdict": report["verdict"],
+                    "cases": len(report["cases"]),
+                    "toolCoverage": report["coverage"]["ratio"],
+                    "inconclusive": sum(
+                        1 for case in report["cases"] if case.get("inconclusive")
+                    ),
+                    "certificateSha256": report["certificateSha256"],
+                    "report": str(Path(arguments.out).resolve()),
+                },
+                indent=2,
+            )
+        )
+        _print_case_verdicts(report)
+        return _exit_code(report)
+
     if arguments.cmd == "mcp-verify":
         try:
             report = verify_manifest(arguments.manifest)
@@ -96,54 +213,48 @@ def main(argv: list[str] | None = None, prog: str = "safesink") -> int:
         }
         print(json.dumps(summary, indent=2))
         if arguments.verbose:
-            for case in report["cases"]:
-                status = "PASS" if case["passed"] else "FAIL"
-                print(f"  {status} {case['id']} ({case['tool']})", file=sys.stderr)
-                for v in case.get("violations", []):
-                    print(f"    - {v['code']}: {v.get('message','')}", file=sys.stderr)
-        return 0 if report["verdict"] == "pass" else 2
+            _print_case_verdicts(report)
+        return _exit_code(report)
 
-    if arguments.cmd == "mcp-scan":
-        observer_root = Path(arguments.observer_root)
-        observer_root.mkdir(parents=True, exist_ok=True)
-        try:
-            tools, server_info = list_server_tools(
-                arguments.command,
-                cwd=Path(arguments.cwd).resolve(),
-                inherit_env=arguments.inherit_env,
-                protocol_version=arguments.protocol_version,
-                startup_timeout_seconds=arguments.startup_timeout,
-            )
-            manifest = build_manifest(
-                tools,
-                command=arguments.command,
-                observer_root=str(observer_root),
-                cwd=arguments.cwd,
-                include_destructive=arguments.include_destructive,
-                setup_command=arguments.setup_command,
-                minimum_tool_coverage=arguments.min_coverage,
-                inherit_env=arguments.inherit_env,
-                protocol_version=arguments.protocol_version,
-            )
-        except ScanError as error:
-            parser.error(str(error))
-        destination = write_manifest(manifest, arguments.out)
-        print(
-            json.dumps(
-                {
-                    "server": server_info.get("name"),
-                    "version": server_info.get("version"),
-                    "toolsAdvertised": len(tools),
-                    "casesGenerated": len(manifest["cases"]),
-                    "skipped": manifest["generated"]["skipped"],
-                    "manifest": str(destination),
-                },
-                indent=2,
-            )
+    # mcp-scan
+    observer_root = Path(arguments.observer_root)
+    observer_root.mkdir(parents=True, exist_ok=True)
+    try:
+        tools, server_info = list_server_tools(
+            arguments.command,
+            cwd=Path(arguments.cwd).resolve(),
+            inherit_env=arguments.inherit_env,
+            protocol_version=arguments.protocol_version,
+            startup_timeout_seconds=arguments.startup_timeout,
         )
-        return 0
-
-    print(citation(arguments.format))
+        manifest = build_manifest(
+            tools,
+            command=arguments.command,
+            observer_root=str(observer_root),
+            cwd=arguments.cwd,
+            include_destructive=arguments.include_destructive,
+            setup_command=arguments.setup_command,
+            minimum_tool_coverage=arguments.min_coverage,
+            inherit_env=arguments.inherit_env,
+            protocol_version=arguments.protocol_version,
+        )
+    except (ScanError, McpClientError) as error:
+        _die(parser, str(error), hint="the server must speak MCP over stdio")
+        return 2
+    destination = write_manifest(manifest, arguments.out)
+    print(
+        json.dumps(
+            {
+                "server": server_info.get("name"),
+                "version": server_info.get("version"),
+                "toolsAdvertised": len(tools),
+                "casesGenerated": len(manifest["cases"]),
+                "skipped": manifest["generated"]["skipped"],
+                "manifest": str(destination),
+            },
+            indent=2,
+        )
+    )
     return 0
 
 

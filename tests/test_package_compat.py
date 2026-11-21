@@ -117,12 +117,17 @@ class DeprecatedAliasTests(unittest.TestCase):
         self.assertIn('effectfence = "effectfence.cli:main"', pyproject)
 
     def test_deprecated_cli_warns_and_matches_the_primary_verdict(self) -> None:
-        with contextlib.redirect_stdout(io.StringIO()):
-            primary = safesink_main(["citation", "--format", "bibtex"])
-            with self.assertWarns(DeprecationWarning):
-                alias = effectfence_main(["citation", "--format", "bibtex"])
-        self.assertEqual(primary, 0)
-        self.assertEqual(alias, primary)
+        codes = []
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            for index, main in enumerate((safesink_main, effectfence_main)):
+                with warnings.catch_warnings(record=True) as caught:
+                    warnings.simplefilter("always")
+                    with self.assertRaises(SystemExit) as raised:
+                        main(["--help"])
+                codes.append(raised.exception.code)
+                self.assertEqual(bool(caught), index == 1)
+        self.assertIn("mcp-check", out.getvalue())
+        self.assertEqual(codes, [0, 0])
 
     def test_deprecated_cli_keeps_the_failure_exit_code(self) -> None:
         missing = str(ROOT / "missing-manifest.json")

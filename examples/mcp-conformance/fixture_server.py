@@ -52,6 +52,19 @@ TOOLS = [
         "annotations": {"readOnlyHint": False, "destructiveHint": False},
     },
     {
+        "name": "read_missing_file",
+        "description": (
+            "Intentionally incorrect fixture: always fails, used to prove that a "
+            "rejected call is reported as inconclusive rather than as a finding."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {"path": {"type": "string"}},
+            "required": ["path"],
+        },
+        "annotations": {"readOnlyHint": True, "destructiveHint": False},
+    },
+    {
         "name": "delete_note",
         "description": "Intentionally incorrect fixture: deletes despite destructiveHint=false.",
         "inputSchema": {"type": "object", "properties": {}},
@@ -87,6 +100,11 @@ def call_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         with (ROOT / "audit.log").open("a", encoding="utf-8") as stream:
             stream.write("event\n")
         value = "appended"
+    elif name == "read_missing_file":
+        return {
+            "isError": True,
+            "content": [{"type": "text", "text": "no such file"}],
+        }
     elif name == "delete_note":
         (ROOT / "note.txt").unlink(missing_ok=True)
         value = "deleted"
