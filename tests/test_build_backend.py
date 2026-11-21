@@ -21,21 +21,26 @@ class BuildBackendTests(unittest.TestCase):
             )
             with zipfile.ZipFile(first_wheel) as archive:
                 names = archive.namelist()
+                # new primary package
+                self.assertIn(
+                    "safesink/schemas/mcp-manifest-v1.schema.json", names
+                )
+                self.assertIn("safesink-0.3.0.dist-info/LICENSE", names)
+                metadata = archive.read("safesink-0.3.0.dist-info/METADATA")
+                self.assertIn(b"Version: 0.3.0", metadata)
+                self.assertIn(b"Description-Content-Type: text/markdown", metadata)
+                # legacy shim still shipped
                 self.assertIn(
                     "effectfence/schemas/mcp-manifest-v1.schema.json", names
                 )
-                self.assertIn("effectfence-0.2.0.dist-info/LICENSE", names)
-                metadata = archive.read("effectfence-0.2.0.dist-info/METADATA")
-                self.assertIn(b"Version: 0.2.0", metadata)
-                self.assertIn(b"Description-Content-Type: text/markdown", metadata)
 
     def test_sdist_contains_offline_build_backend(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory) / build_backend.build_sdist(directory)
             with tarfile.open(source) as archive:
                 names = archive.getnames()
-            self.assertIn("effectfence-0.2.0/build_backend.py", names)
-            self.assertIn("effectfence-0.2.0/pyproject.toml", names)
+            self.assertIn("safesink-0.3.0/build_backend.py", names)
+            self.assertIn("safesink-0.3.0/pyproject.toml", names)
             self.assertFalse(any(".egg-info/" in name for name in names))
 
 

@@ -10,8 +10,8 @@ import zipfile
 from pathlib import Path
 
 
-NAME = "effectfence"
-VERSION = "0.2.0"
+NAME = "safesink"
+VERSION = "0.3.0"
 DIST = f"{NAME}-{VERSION}"
 WHEEL = f"{DIST}-py3-none-any.whl"
 
@@ -21,12 +21,12 @@ def _metadata() -> str:
     headers = f"""Metadata-Version: 2.3
 Name: {NAME}
 Version: {VERSION}
-Summary: Crash/retry and MCP side-effect conformance verifier
+Summary: Crash/retry and MCP side-effect conformance verifier (formerly EffectFence)
 Author: Viraj Sabhaya
 License: Apache-2.0
 Requires-Python: >=3.10
 Description-Content-Type: text/markdown
-Keywords: mcp,model-context-protocol,idempotency,conformance,crash-recovery
+Keywords: mcp,model-context-protocol,idempotency,conformance,crash-recovery,safesink
 Classifier: Development Status :: 4 - Beta
 Classifier: Environment :: Console
 Classifier: Intended Audience :: Developers
@@ -36,9 +36,9 @@ Classifier: Programming Language :: Python :: 3
 Classifier: Programming Language :: Python :: 3 :: Only
 Classifier: Topic :: Software Development :: Quality Assurance
 Classifier: Topic :: Software Development :: Testing
-Project-URL: Homepage, https://github.com/virajsabhaya23/effectfence
-Project-URL: Repository, https://github.com/virajsabhaya23/effectfence
-Project-URL: Issues, https://github.com/virajsabhaya23/effectfence/issues
+Project-URL: Homepage, https://github.com/virajsabhaya23/safesink
+Project-URL: Repository, https://github.com/virajsabhaya23/safesink
+Project-URL: Issues, https://github.com/virajsabhaya23/safesink/issues
 Provides-Extra: live-kafka-postgres
 Requires-Dist: confluent-kafka>=2.5,<3; extra == "live-kafka-postgres"
 Requires-Dist: psycopg[binary]>=3.2,<4; extra == "live-kafka-postgres"
@@ -49,7 +49,7 @@ Requires-Dist: psycopg[binary]>=3.2,<4; extra == "live-kafka-postgres"
 
 def _wheel_metadata() -> str:
     return """Wheel-Version: 1.0
-Generator: effectfence-build-backend
+Generator: safesink-build-backend
 Root-Is-Purelib: true
 Tag: py3-none-any
 """
@@ -63,6 +63,8 @@ def _hash(data: bytes) -> str:
 def _package_files(root: Path) -> list[tuple[Path, str]]:
     included: list[tuple[Path, str]] = []
     for pattern in ("*.py", "*.json"):
+        for path in (root / "safesink").rglob(pattern):
+            included.append((path, path.relative_to(root).as_posix()))
         for path in (root / "effectfence").rglob(pattern):
             included.append((path, path.relative_to(root).as_posix()))
     return sorted(included, key=lambda item: item[1])
@@ -105,7 +107,8 @@ def build_wheel(
             f"{dist_info}/WHEEL": _wheel_metadata().encode(),
             f"{dist_info}/LICENSE": (root / "LICENSE").read_bytes(),
             f"{dist_info}/entry_points.txt": (
-                b"[console_scripts]\neffectfence = effectfence.cli:main\n"
+                b"[console_scripts]\nsafesink = safesink.cli:main\n"
+                b"effectfence = safesink.cli:main\n"
             ),
         }
         for archive_name, data in generated.items():
@@ -129,7 +132,9 @@ def prepare_metadata_for_build_wheel(
     (directory / "METADATA").write_text(_metadata(), encoding="utf-8")
     (directory / "WHEEL").write_text(_wheel_metadata(), encoding="utf-8")
     (directory / "entry_points.txt").write_text(
-        "[console_scripts]\neffectfence = effectfence.cli:main\n", encoding="utf-8"
+        "[console_scripts]\nsafesink = safesink.cli:main\n"
+        "effectfence = safesink.cli:main\n",
+        encoding="utf-8",
     )
     return directory.name
 

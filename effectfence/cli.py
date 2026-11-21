@@ -31,7 +31,7 @@ def _die(parser: argparse.ArgumentParser, message: str, *, hint: str | None = No
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="effectfence", description="Crash/retry and MCP side-effect verifier"
+        prog="effectfence", description="Crash/retry and MCP side-effect verifier (formerly EffectFence)"
     )
     commands = parser.add_subparsers(dest="cmd", required=True)
 
@@ -54,8 +54,8 @@ def build_parser() -> argparse.ArgumentParser:
     mcp = commands.add_parser(
         "mcp-verify", help="verify MCP tool annotations against observed effects"
     )
-    mcp.add_argument("manifest", help="path to an effectfence.mcp.v1 manifest")
-    mcp.add_argument("--out", default="effectfence-mcp-report.json", help="JSON report path")
+    mcp.add_argument("manifest", help="path to a safesink.mcp.v1 / effectfence.mcp.v1 manifest")
+    mcp.add_argument("--out", default="safesink-mcp-report.json", help="JSON report path")
     mcp.add_argument("--junit", help="JUnit XML path")
     mcp.add_argument("--sarif", help="SARIF path")
     mcp.add_argument("--verbose", action="store_true", help="print per-case verdicts")
@@ -91,14 +91,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     live.add_argument(
         "--bootstrap-servers",
-        default=os.environ.get("EFFECTFENCE_KAFKA_BOOTSTRAP", "127.0.0.1:9092"),
+        default=os.environ.get("SAFESINK_KAFKA_BOOTSTRAP", os.environ.get("EFFECTFENCE_KAFKA_BOOTSTRAP", "127.0.0.1:9092")),
     )
     live.add_argument(
         "--postgres-dsn",
-        default=os.environ.get("EFFECTFENCE_POSTGRES_DSN"),
-        help="PostgreSQL DSN; defaults to EFFECTFENCE_POSTGRES_DSN",
+        default=os.environ.get("SAFESINK_POSTGRES_DSN", os.environ.get("EFFECTFENCE_POSTGRES_DSN")),
+        help="PostgreSQL DSN; defaults to SAFESINK_POSTGRES_DSN (or legacy EFFECTFENCE_POSTGRES_DSN)",
     )
-    live.add_argument("--strategy", choices=("effectfence", "naive"), default="effectfence")
+    live.add_argument("--strategy", choices=("safesink", "effectfence", "naive"), default="safesink")
     live.add_argument("--expect", choices=("safe", "unsafe"), default="safe")
     live.add_argument("--run-id")
     live.add_argument("--message-id")
@@ -111,6 +111,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    import warnings
+    warnings.warn("effectfence is deprecated, use safesink (pip install safesink)", DeprecationWarning, stacklevel=2)
     parser = build_parser()
     arguments = parser.parse_args(argv)
     if arguments.cmd == "verify":
@@ -256,20 +258,24 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if not arguments.postgres_dsn:
-        _die(parser, "live-kafka-postgres requires --postgres-dsn or EFFECTFENCE_POSTGRES_DSN", hint="export EFFECTFENCE_POSTGRES_DSN or pass --postgres-dsn")
+        _die(parser, "live-kafka-postgres requires --postgres-dsn or SAFESINK_POSTGRES_DSN", hint="export SAFESINK_POSTGRES_DSN or pass --postgres-dsn (legacy EFFECTFENCE_POSTGRES_DSN also accepted)")
         return 2
     if arguments.timeout is not None and arguments.timeout <= 0:
         _die(parser, "--timeout must be > 0")
         return 2
+    # normalize strategy alias: safesink is the new name for the effectfence strategy
+    strategy = arguments.strategy
+    if strategy == "safesink":
+        strategy = "effectfence"
     run_id = arguments.run_id or default_run_id()
     config = LiveConfig(
         bootstrap_servers=arguments.bootstrap_servers,
         postgres_dsn=arguments.postgres_dsn,
-        topic=arguments.topic or f"effectfence-{run_id}",
-        group_id=arguments.group_id or f"effectfence-{run_id}",
+        topic=arguments.topic or f"safesink-{run_id}",
+        group_id=arguments.group_id or f"safesink-{run_id}",
         run_id=run_id,
         message_id=arguments.message_id or f"message-{run_id}",
-        strategy=arguments.strategy,
+        strategy=strategy,
         expected_outcome=arguments.expect,
         artifact_dir=Path(arguments.artifact_dir) / run_id,
         timeout_seconds=arguments.timeout,

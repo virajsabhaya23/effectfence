@@ -112,7 +112,10 @@ class Simulator:
         self.maybe_crash('after_ack',actor)
 
     def run_attempt(self,actor,attempt):
-        fn={'naive_retry':self._naive,'idempotency_key':self._idempotent,'transactional_outbox':self._outbox,'effectfence':self._effectfence}[self.s.strategy]
+        strategy = self.s.strategy
+        if strategy == "safesink":
+            strategy = "effectfence"
+        fn={'naive_retry':self._naive,'idempotency_key':self._idempotent,'transactional_outbox':self._outbox,'effectfence':self._effectfence}[strategy]
         try: fn(actor,attempt)
         except Crash: pass
 
@@ -134,7 +137,7 @@ class Simulator:
         violations=[]
         if effects < self.s.expect_effects: violations.append({'kind':'lost_effect','expected':self.s.expect_effects,'actual':effects})
         if effects > self.s.expect_effects: violations.append({'kind':'duplicate_effect','expected':self.s.expect_effects,'actual':effects})
-        if self.s.strategy=='effectfence':
+        if self.s.strategy in ('effectfence', 'safesink'):
             stale=[e for e in self.ledger.effects(self.s.id) if e['fence'] is not None and e['fence'] < self.ledger.current_fence(self.s.id)]
             # Accepted earlier valid effects are not stale violations; stale rejection is observed via accepted=False.
         payload={'scenario_id':self.s.id,'strategy':self.s.strategy,'safe':not violations,'violations':violations,'trace':self.trace,
