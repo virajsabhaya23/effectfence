@@ -389,7 +389,10 @@ safesink audit --markdown out/audit.md
 
 Reads `.mcp.json`, `.vscode/mcp.json`, `.cursor/mcp.json` and the usual Claude
 Desktop config, then checks every server in them. One broken server is reported
-as `error` without hiding the others.
+as `error` without hiding the others, and a discovered config that is not an MCP
+config is listed as skipped rather than stopping the run. A tool that needs state
+the audit did not seed reports `CASE_EXECUTION_FAILED` - an error is never a
+pass.
 
 ## Protocol support
 
