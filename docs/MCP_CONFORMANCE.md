@@ -248,6 +248,20 @@ SHA-256, and the JUnit report carries `baselineSuppressedCount` plus one
 baseline that was merely inconclusive cannot hide a violation the new run found:
 that violation is new.
 
+## Isolating cases
+
+One server process runs every case by default. `setup` hooks reset external
+state, but not the server's memory: a cached connection, a held lock or an
+accumulated session changes what the next case observes, and the result is an
+unexplained delta. `--restart-per-case` (or `server.restartPerCase`) tears the
+process down after each case and starts a fresh one with a new `initialize`.
+`server.restarts` and `case.serverInstance` record which cases shared a process.
+
+`--case-order` (or `server.caseOrder`) controls execution order: `file` keeps the
+manifest order, `name` sorts by case id, and `manifest` follows the top-level
+`caseOrder` array, then anything it does not name. A reproducible order matters
+when bisecting a stateful server.
+
 ## Accepted findings
 
 A baseline says "not fixed yet"; a suppression says "accepted, deliberately".

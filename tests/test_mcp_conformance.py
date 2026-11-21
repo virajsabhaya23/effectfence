@@ -77,6 +77,44 @@ for line in sys.stdin:
         })
 '''
 
+# Records its own pid on initialize, so a restart is observable as a new process.
+RESTART_SERVER = '''
+import json, os, sys
+
+LOG = os.environ["RESTART_LOG"]
+TOOLS = [
+    {
+        "name": "ping",
+        "annotations": {"readOnlyHint": True},
+        "inputSchema": {"type": "object", "properties": {}},
+    }
+]
+
+
+def respond(request_id, result):
+    sys.stdout.write(json.dumps({"jsonrpc": "2.0", "id": request_id, "result": result}) + "\\n")
+    sys.stdout.flush()
+
+
+for line in sys.stdin:
+    request = json.loads(line)
+    if "id" not in request:
+        continue
+    method = request.get("method")
+    if method == "initialize":
+        with open(LOG, "a", encoding="utf-8") as handle:
+            handle.write(str(os.getpid()) + "\\n")
+        respond(request["id"], {
+            "protocolVersion": "2025-11-25",
+            "capabilities": {"tools": {}},
+            "serverInfo": {"name": "restart-fixture", "version": "1.0.0"},
+        })
+    elif method == "tools/list":
+        respond(request["id"], {"tools": TOOLS})
+    elif method == "tools/call":
+        respond(request["id"], {"content": [{"type": "text", "text": "pong"}], "isError": False})
+'''
+
 # Exits before MCP initialization, with a diagnostic and a secret on stderr.
 DEAD_SERVER = '''
 import sys
@@ -515,6 +553,82 @@ class McpConformanceTests(unittest.TestCase):
             )
             with self.assertRaises(ManifestError):
                 load_suppressions(path)
+
+    def restart_manifest(self, root: Path, cases: list[dict], server: dict | None = None) -> Path:
+        state = root / "state"
+        state.mkdir(exist_ok=True)
+        value = {
+            "schemaVersion": "effectfence.mcp.v1",
+            "server": {
+                "transport": "stdio",
+                "command": [sys.executable, str(root / "restart_server.py")],
+                "cwd": str(root),
+                "env": {"RESTART_LOG": str(root / "pids.log")},
+                **(server or {}),
+            },
+            "observers": [
+                {
+                    "id": "state",
+                    "kind": "filesystem",
+                    "root": str(state),
+                    "sensitive": False,
+                }
+            ],
+            "cases": cases,
+        }
+        path = root / "restart-manifest.json"
+        (root / "restart_server.py").write_text(RESTART_SERVER, encoding="utf-8")
+        path.write_text(json.dumps(value), encoding="utf-8")
+        return path
+
+    def test_restart_per_case_starts_a_fresh_process_for_every_case(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = self.restart_manifest(
+                root,
+                [{"id": f"ping-{index}", "tool": "ping", "arguments": {}} for index in range(3)],
+            )
+            shared = verify_manifest(path)
+            self.assertEqual(shared["server"]["restarts"], 0)
+            self.assertEqual(
+                [case["serverInstance"] for case in shared["cases"]], [0, 0, 0]
+            )
+            self.assertEqual(len((root / "pids.log").read_text().split()), 1)
+            (root / "pids.log").write_text("", encoding="utf-8")
+
+            restarted = verify_manifest(path, restart_per_case=True)
+            self.assertEqual(restarted["server"]["restarts"], 2)
+            self.assertEqual(
+                [case["serverInstance"] for case in restarted["cases"]], [0, 1, 2]
+            )
+            pids = (root / "pids.log").read_text().split()
+            self.assertEqual(len(pids), 3)
+            self.assertEqual(len(set(pids)), 3)
+
+    def test_case_order_can_be_alphabetical(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = self.restart_manifest(
+                Path(directory),
+                [
+                    {"id": "z-case", "tool": "ping", "arguments": {}},
+                    {"id": "a-case", "tool": "ping", "arguments": {}},
+                ],
+            )
+            report = verify_manifest(path, case_order="name")
+            self.assertEqual(
+                [case["id"] for case in report["cases"]], ["a-case", "z-case"]
+            )
+            self.assertEqual(report["server"]["caseOrder"], "name")
+
+    def test_unknown_case_order_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = self.restart_manifest(
+                Path(directory),
+                [{"id": "ping", "tool": "ping", "arguments": {}}],
+                {"caseOrder": "random"},
+            )
+            with self.assertRaises(ManifestError):
+                load_manifest(path)
 
     def test_reports_are_valid_xml_and_sarif(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
