@@ -129,6 +129,21 @@ class SynthesizeArgumentTests(unittest.TestCase):
     def test_missing_schema_yields_no_arguments(self) -> None:
         self.assertEqual(synthesize_arguments(None), {})
 
+    def test_source_and_destination_get_different_paths(self) -> None:
+        schema = {
+            "type": "object",
+            "properties": {
+                "source": {"type": "string"},
+                "destination": {"type": "string"},
+            },
+            "required": ["source", "destination"],
+        }
+        arguments = synthesize_arguments(
+            schema, sandbox="/sandbox", tool_name="copy_file"
+        )
+        self.assertNotEqual(arguments["source"], arguments["destination"])
+        self.assertTrue(arguments["source"].endswith("safesink-probe.txt"))
+
 
 class BuildManifestTests(unittest.TestCase):
     def test_destructive_tools_are_skipped_by_default(self) -> None:
@@ -184,6 +199,29 @@ class BuildManifestTests(unittest.TestCase):
             loaded, _ = load_manifest(destination)
         self.assertEqual(loaded["schemaVersion"], "effectfence.mcp.v1")
         self.assertEqual(len(loaded["cases"]), 2)
+
+    def test_generated_cases_are_flagged_for_the_verifier(self) -> None:
+        manifest = build_manifest(
+            [READ_TOOL], command=["server"], observer_root="/sandbox"
+        )
+        self.assertTrue(manifest["cases"][0]["generatedArguments"])
+
+    def test_probe_fixtures_are_seeded_and_arguments_reference_them(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            manifest = build_manifest(
+                [READ_TOOL, LIST_TOOL], command=["server"], observer_root=directory
+            )
+            self.assertTrue(manifest["generated"]["probeFixtures"])
+            read_case, list_case = manifest["cases"]
+            self.assertTrue(Path(read_case["arguments"]["path"]).is_file())
+            self.assertTrue(Path(list_case["arguments"]["path"]).is_dir())
+
+    def test_unwritable_sandbox_does_not_break_the_scan(self) -> None:
+        manifest = build_manifest(
+            [READ_TOOL], command=["server"], observer_root="/sandbox"
+        )
+        self.assertFalse(manifest["generated"]["probeFixtures"])
+        self.assertEqual(len(manifest["cases"]), 1)
 
     def test_manifest_is_written_deterministically(self) -> None:
         manifest = build_manifest(
