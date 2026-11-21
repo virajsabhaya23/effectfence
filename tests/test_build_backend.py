@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 import tarfile
 import tempfile
 import unittest
@@ -38,6 +39,21 @@ class BuildBackendTests(unittest.TestCase):
             metadata,
         )
         self.assertNotIn("virajsabhaya23/effectfence", metadata)
+
+    def test_every_declared_console_script_is_in_the_wheel(self) -> None:
+        """A hand-maintained entry point list is how safesink-mcp went missing."""
+        with tempfile.TemporaryDirectory() as directory:
+            wheel = Path(directory) / build_backend.build_wheel(directory)
+            with zipfile.ZipFile(wheel) as archive:
+                entry_points = archive.read(f"{DIST}.dist-info/entry_points.txt").decode()
+        declared = re.findall(
+            r"(?m)^([A-Za-z0-9_.-]+)\s*=\s*[\"']?[\w.]+:[\w.]+[\"']?$",
+            Path("pyproject.toml").read_text(encoding="utf-8").split("[project.scripts]", 1)[1].split("\n[", 1)[0],
+        )
+        self.assertTrue(declared)
+        for name in declared:
+            self.assertIn(f"{name} = ", entry_points)
+        self.assertIn("safesink-mcp = safesink.mcp_server:main", entry_points)
 
     def test_wheel_is_reproducible_and_contains_schema_and_license(self) -> None:
         with tempfile.TemporaryDirectory() as first, tempfile.TemporaryDirectory() as second:

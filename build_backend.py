@@ -85,6 +85,27 @@ def _write_zip(archive: zipfile.ZipFile, name: str, data: bytes) -> None:
     archive.writestr(info, data)
 
 
+def _entry_points() -> str:
+    """Console scripts, read from pyproject so the wheel cannot drift from it.
+
+    ``tomllib`` is 3.11+ and this backend supports 3.10, so the small
+    ``[project.scripts]`` block is parsed directly.
+    """
+    text = (Path(__file__).resolve().parent / "pyproject.toml").read_text(encoding="utf-8")
+    marker = "[project.scripts]"
+    start = text.index(marker) + len(marker)
+    block = text[start:].split("\n[", 1)[0]
+    lines = []
+    for line in block.splitlines():
+        if "=" not in line or line.strip().startswith("#"):
+            continue
+        name, _, target = line.partition("=")
+        lines.append(f'{name.strip()} = {target.strip().strip(chr(34))}')
+    if not lines:
+        raise RuntimeError("pyproject.toml declares no console scripts")
+    return "[console_scripts]\n" + "\n".join(lines) + "\n"
+
+
 def build_wheel(
     wheel_directory: str,
     config_settings: dict | None = None,
@@ -106,11 +127,7 @@ def build_wheel(
             f"{dist_info}/METADATA": _metadata().encode(),
             f"{dist_info}/WHEEL": _wheel_metadata().encode(),
             f"{dist_info}/LICENSE": (root / "LICENSE").read_bytes(),
-            f"{dist_info}/entry_points.txt": (
-                b"[console_scripts]\nsafesink = safesink.cli:main\n"
-                b"safesink-legacy = safesink.legacy.cli:main\n"
-                b"effectfence = effectfence.cli:main\n"
-            ),
+            f"{dist_info}/entry_points.txt": _entry_points().encode(),
         }
         for archive_name, data in generated.items():
             _write_zip(archive, archive_name, data)
@@ -132,12 +149,7 @@ def prepare_metadata_for_build_wheel(
     directory.mkdir(parents=True, exist_ok=True)
     (directory / "METADATA").write_text(_metadata(), encoding="utf-8")
     (directory / "WHEEL").write_text(_wheel_metadata(), encoding="utf-8")
-    (directory / "entry_points.txt").write_text(
-        "[console_scripts]\nsafesink = safesink.cli:main\n"
-        "safesink-legacy = safesink.legacy.cli:main\n"
-        "effectfence = effectfence.cli:main\n",
-        encoding="utf-8",
-    )
+    (directory / "entry_points.txt").write_text(_entry_points(), encoding="utf-8")
     return directory.name
 
 
