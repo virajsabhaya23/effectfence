@@ -12,6 +12,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib.resources import files
 from pathlib import Path
 
+from safesink.cli import main as cli_main
 from safesink.mcp_client import restricted_environment
 from safesink.mcp_reports import (
     write_junit_report,
@@ -29,6 +30,45 @@ from safesink.observers import (
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURE_SERVER = ROOT / "examples/mcp-conformance/fixture_server.py"
 RESET_FIXTURE = ROOT / "examples/mcp-conformance/reset_fixture.py"
+
+# Answers quickly, but every tools/call sleeps past a small run budget.
+SLOW_SERVER = '''
+import json, sys, time
+
+TOOLS = [
+    {
+        "name": "slow_note",
+        "annotations": {"readOnlyHint": True},
+        "inputSchema": {"type": "object", "properties": {}},
+    }
+]
+
+
+def respond(request_id, result):
+    sys.stdout.write(json.dumps({"jsonrpc": "2.0", "id": request_id, "result": result}) + "\\n")
+    sys.stdout.flush()
+
+
+for line in sys.stdin:
+    request = json.loads(line)
+    if "id" not in request:
+        continue
+    method = request.get("method")
+    if method == "initialize":
+        respond(request["id"], {
+            "protocolVersion": "2025-11-25",
+            "capabilities": {"tools": {}},
+            "serverInfo": {"name": "slow-fixture", "version": "1.0.0"},
+        })
+    elif method == "tools/list":
+        respond(request["id"], {"tools": TOOLS})
+    elif method == "tools/call":
+        time.sleep(1.5)
+        respond(request["id"], {
+            "content": [{"type": "text", "text": "slow"}],
+            "isError": False,
+        })
+'''
 
 # Exits before MCP initialization, with a diagnostic and a secret on stderr.
 DEAD_SERVER = '''
@@ -605,6 +645,74 @@ class McpConformanceTests(unittest.TestCase):
             self.assertTrue(delta["digestsRedacted"])
             self.assertNotIn("beforeSha256", delta)
             self.assertNotIn("paths", delta)
+
+    def slow_manifest(self, root: Path) -> Path:
+        server = root / "slow_server.py"
+        server.write_text(SLOW_SERVER, encoding="utf-8")
+        state = root / "state"
+        state.mkdir(exist_ok=True)
+        manifest = {
+            "schemaVersion": "effectfence.mcp.v1",
+            "server": {
+                "transport": "stdio",
+                "command": [sys.executable, str(server)],
+                "cwd": str(root),
+                "startupTimeoutSeconds": 5,
+                "requestTimeoutSeconds": 10,
+            },
+            "observers": [
+                {
+                    "id": "state",
+                    "kind": "filesystem",
+                    "root": str(state),
+                    "sensitive": False,
+                }
+            ],
+            "cases": [
+                {"id": f"slow-{index}", "tool": "slow_note", "arguments": {}}
+                for index in range(3)
+            ],
+            "policy": {"runTimeoutSeconds": 1},
+        }
+        path = root / "slow-manifest.json"
+        path.write_text(json.dumps(manifest), encoding="utf-8")
+        return path
+
+    def test_run_budget_reports_remaining_cases_as_unverified(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = self.slow_manifest(Path(directory))
+            report = verify_manifest(path)
+            self.assertEqual(report["verdict"], "inconclusive")
+            self.assertTrue(report["runBudget"]["exhausted"])
+            self.assertEqual(report["runBudget"]["timeoutSeconds"], 1.0)
+            self.assertEqual(report["cases"][0]["id"], "slow-0")
+            for case in report["cases"][1:]:
+                self.assertEqual(
+                    [item["code"] for item in case["inconclusive"]],
+                    ["RUN_BUDGET_EXHAUSTED"],
+                )
+            self.assertFalse(any(case["violations"] for case in report["cases"]))
+
+    def test_cli_timeout_exits_three_without_fabricating_a_finding(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = self.slow_manifest(root)
+            report_path = root / "report.json"
+            exit_code = cli_main(
+                ["mcp-verify", str(path), "--out", str(report_path), "--timeout", "1"]
+            )
+            self.assertEqual(exit_code, 3)
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+            self.assertEqual(report["verdict"], "inconclusive")
+
+    def test_non_positive_run_timeout_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = self.slow_manifest(Path(directory))
+            value = json.loads(path.read_text())
+            value["policy"]["runTimeoutSeconds"] = 0
+            path.write_text(json.dumps(value), encoding="utf-8")
+            with self.assertRaises(ManifestError):
+                load_manifest(path)
 
     def test_fatal_error_names_its_phase_without_stderr_by_default(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

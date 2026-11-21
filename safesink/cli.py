@@ -123,6 +123,11 @@ def build_parser(prog: str = "safesink") -> argparse.ArgumentParser:
         action="store_true",
         help="include a bounded, redacted server stderr excerpt in the report",
     )
+    check.add_argument(
+        "--timeout",
+        type=float,
+        help="stop issuing calls after this many seconds and report the rest as unverified",
+    )
     check.add_argument("--protocol-version", default="2025-11-25")
     check.add_argument("--startup-timeout", type=float, default=60.0)
     check.add_argument(
@@ -150,6 +155,11 @@ def build_parser(prog: str = "safesink") -> argparse.ArgumentParser:
         "--capture-stderr",
         action="store_true",
         help="include a bounded, redacted server stderr excerpt in the report",
+    )
+    mcp.add_argument(
+        "--timeout",
+        type=float,
+        help="stop issuing calls after this many seconds and report the rest as unverified",
     )
 
     scan = commands.add_parser(
@@ -271,7 +281,9 @@ def main(argv: list[str] | None = None, prog: str = "safesink") -> int:
             )
             write_manifest(manifest, manifest_path)
             report = verify_manifest(
-                manifest_path, capture_stderr=arguments.capture_stderr
+                manifest_path,
+                capture_stderr=arguments.capture_stderr,
+                timeout_seconds=arguments.timeout,
             )
         except ScanError as error:
             _die(parser, str(error))
@@ -314,7 +326,9 @@ def main(argv: list[str] | None = None, prog: str = "safesink") -> int:
     if arguments.cmd == "mcp-verify":
         try:
             report = verify_manifest(
-                arguments.manifest, capture_stderr=arguments.capture_stderr
+                arguments.manifest,
+                capture_stderr=arguments.capture_stderr,
+                timeout_seconds=arguments.timeout,
             )
         except ManifestError as error:
             _die(parser, str(error), hint="see docs/MCP_CONFORMANCE.md#manifest")
