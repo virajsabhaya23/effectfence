@@ -55,6 +55,12 @@ Why second: adoption fails on noise and safety, not on missing findings.
 
 Why third: none of it matters until the check is true and the gate is cheap.
 
+## Naming
+
+The distribution is `safesink`; the legacy `effectfence` import package and CLI
+alias remain for compatibility only. SafeSink is unrelated to the Rust/npm
+project of the same former name - see the "Name" section of the README.
+
 ## Now
 
 Shipped and documented:
