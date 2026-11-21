@@ -211,6 +211,21 @@ matches nothing is reported stale, and every applied suppression is listed with
 its reason in the report. `--fail-on-suppressed` turns any acceptance into a
 failure for high-assurance runs.
 
+## Certificates
+
+A report's digest proves nothing on its own. Issue a detached certificate and
+anyone can check it against the report:
+
+```bash
+safesink sign --report out/mcp/report.json --out out/certificate.json
+safesink verify-cert out/certificate.json --report out/mcp/report.json
+```
+
+Verification re-derives the digest chain, so an edited report fails. Add
+`--key $ED25519_SEED` to sign, and `--public-key $EXPECTED` when verifying to
+require a specific issuer. See [docs/CERTIFICATES.md](docs/CERTIFICATES.md) for
+what a certificate does and does not prove.
+
 ## Trust score
 
 Every report also carries `score: {value, version, formula, inputs}`: 100 minus

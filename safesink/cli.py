@@ -9,6 +9,13 @@ import tempfile
 from pathlib import Path
 
 from . import __version__
+from .certificates import (
+    CertificateError,
+    build_certificate,
+    generate_key,
+    sign_certificate,
+    verify_certificate,
+)
 from .mcp_client import McpClientError
 from .mcp_lint import lint_manifest, lint_tools
 from .mcp_reports import (
@@ -354,6 +361,33 @@ def build_parser(prog: str = "safesink") -> argparse.ArgumentParser:
         help="stdio command that starts the server; place it after ' -- '",
     )
 
+    sign = commands.add_parser(
+        "sign", help="issue a detached certificate for a report (optionally Ed25519-signed)"
+    )
+    sign.add_argument("--report", required=True, help="JSON report to certify")
+    sign.add_argument(
+        "--out", default="safesink-certificate.json", help="certificate path"
+    )
+    sign.add_argument(
+        "--key",
+        help="32-byte hex Ed25519 seed; omit for a digest-only certificate",
+    )
+    sign.add_argument(
+        "--keygen", action="store_true", help="print a new keypair and exit"
+    )
+
+    verify_cert = commands.add_parser(
+        "verify-cert", help="verify a certificate against its report"
+    )
+    verify_cert.add_argument("certificate", help="certificate JSON path")
+    verify_cert.add_argument("--report", required=True, help="JSON report path")
+    verify_cert.add_argument(
+        "--public-key", help="expected hex public key, overriding the embedded one"
+    )
+    verify_cert.add_argument(
+        "--json", action="store_true", dest="as_json", help="print JSON"
+    )
+
     mcp = commands.add_parser(
         "mcp-verify", help="verify MCP tool annotations against observed effects"
     )
@@ -653,6 +687,75 @@ def main(argv: list[str] | None = None, prog: str = "safesink") -> int:
         if _below_min_score(report, arguments.min_score):
             return 2
         return _exit_code(report)
+
+    if arguments.cmd == "sign":
+        if arguments.keygen:
+            seed, key = generate_key()
+            print(
+                json.dumps(
+                    {
+                        "privateKey": seed,
+                        "publicKey": key,
+                        "note": "store the private key offline; publish only the public key",
+                    },
+                    indent=2,
+                )
+            )
+            return 0
+        try:
+            report = json.loads(Path(arguments.report).read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            _die(parser, f"report not found: {arguments.report}")
+            return 2
+        except (OSError, json.JSONDecodeError) as error:
+            _die(parser, f"could not read report: {error}")
+            return 2
+        try:
+            certificate = build_certificate(report)
+            if arguments.key:
+                certificate = sign_certificate(certificate, arguments.key)
+        except CertificateError as error:
+            _die(parser, str(error), hint="generate one with: safesink sign --keygen")
+            return 2
+        destination = Path(arguments.out)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(
+            json.dumps(certificate, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
+        print(
+            json.dumps(
+                {
+                    "certificate": str(destination),
+                    "signed": bool(arguments.key),
+                    "publicKey": certificate.get("publicKey"),
+                    "reportSha256": certificate["reportSha256"],
+                },
+                indent=2,
+            )
+        )
+        return 0
+
+    if arguments.cmd == "verify-cert":
+        try:
+            certificate = json.loads(
+                Path(arguments.certificate).read_text(encoding="utf-8")
+            )
+            report = json.loads(Path(arguments.report).read_text(encoding="utf-8"))
+        except FileNotFoundError as error:
+            _die(parser, f"file not found: {error.filename}")
+            return 2
+        except (OSError, json.JSONDecodeError) as error:
+            _die(parser, f"could not read input: {error}")
+            return 2
+        result = verify_certificate(
+            certificate, report, public_key_hex=arguments.public_key
+        )
+        if arguments.as_json:
+            print(json.dumps(result, indent=2, sort_keys=True))
+        else:
+            state = "VALID" if result["valid"] else "INVALID"
+            print(f"{state}: {result['reason']}")
+        return 0 if result["valid"] else 2
 
     if arguments.cmd == "lint":
         if arguments.manifest:
