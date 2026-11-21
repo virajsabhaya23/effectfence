@@ -224,6 +224,31 @@ pin a released commit or tag:
 Pin a full commit SHA in high-assurance environments. Preserve the JSON report
 as a CI artifact and use the process exit code as the merge gate.
 
+## Trust score
+
+Every report carries `score: {value, version, formula, inputs}`. The score starts
+at 100 and is derived only from evidence, so a badge or a gate can consume one
+number without re-reading the cases. Score version `1` deducts:
+
+| Event | Points |
+| --- | --- |
+| `READ_ONLY_HINT_MISMATCH` or `IDEMPOTENT_HINT_MISMATCH` (a lie about the effect) | 25 each |
+| `NON_DESTRUCTIVE_HINT_MISMATCH` or `CLOSED_WORLD_HINT_MISMATCH` | 15 each |
+| `AMBIGUOUS_RESULT_DUPLICATE_ON_RETRY` | 20 each |
+| any other violation or policy violation | 10 each |
+| each case with inconclusive evidence | 10 |
+| coverage shortfall below `policy.minimumToolCoverage` | 20 x shortfall |
+| a fatal error | 25 |
+
+The result is floored at 0. A curated manifest that deliberately covers fewer
+tools than the server advertises is not penalised as long as it meets its own
+policy; "could not verify" always costs something, so an inconclusive run can
+never tie a clean pass. `score.version` changes whenever the weights change, so an
+old report stays interpretable.
+
+`--min-score N` on `mcp-check` or `mcp-verify` exits 2 when the score is below
+`N`, which turns an inconclusive run into a hard gate without inventing a finding.
+
 ## Contracts for unannotated servers
 
 An unannotated tool is never called, because a pass would claim verification that

@@ -148,6 +148,11 @@ def build_parser(prog: str = "safesink") -> argparse.ArgumentParser:
         help="also call tools declaring destructiveHint (sandbox only)",
     )
     check.add_argument("--min-coverage", type=float, default=0.0)
+    check.add_argument(
+        "--min-score",
+        type=float,
+        help="fail when the documented trust score is below this value (0-100)",
+    )
     check.add_argument("--inherit-env", nargs="+", default=["HOME"])
     check.add_argument(
         "--env",
@@ -217,6 +222,11 @@ def build_parser(prog: str = "safesink") -> argparse.ArgumentParser:
     )
     mcp.add_argument("--junit", help="JUnit XML path")
     mcp.add_argument("--sarif", help="SARIF path")
+    mcp.add_argument(
+        "--min-score",
+        type=float,
+        help="fail when the documented trust score is below this value (0-100)",
+    )
     mcp.add_argument("--verbose", action="store_true", help="print per-case verdicts")
     mcp.add_argument(
         "--capture-stderr",
@@ -264,6 +274,19 @@ def build_parser(prog: str = "safesink") -> argparse.ArgumentParser:
         help="stdio command that starts the server; place it after ' -- '",
     )
     return parser
+
+
+def _below_min_score(report: dict, minimum: float | None) -> bool:
+    if minimum is None:
+        return False
+    score = int(report.get("score", {}).get("value", 0))
+    if score >= minimum:
+        return False
+    print(
+        f"safesink: trust score {score} is below --min-score {minimum:g}",
+        file=sys.stderr,
+    )
+    return True
 
 
 def _exit_code(report: dict) -> int:
@@ -444,6 +467,7 @@ def main(argv: list[str] | None = None, prog: str = "safesink") -> int:
                     "inconclusive": sum(
                         1 for case in report["cases"] if case.get("inconclusive")
                     ),
+                    "score": report["score"]["value"],
                     "certificateSha256": report["certificateSha256"],
                     "report": str(Path(arguments.out).resolve()),
                 },
@@ -451,6 +475,8 @@ def main(argv: list[str] | None = None, prog: str = "safesink") -> int:
             )
         )
         _print_case_verdicts(report)
+        if _below_min_score(report, arguments.min_score):
+            return 2
         return _exit_code(report)
 
     if arguments.cmd == "mcp-verify":
@@ -480,6 +506,8 @@ def main(argv: list[str] | None = None, prog: str = "safesink") -> int:
         print(json.dumps(summary, indent=2))
         if arguments.verbose:
             _print_case_verdicts(report)
+        if _below_min_score(report, arguments.min_score):
+            return 2
         return _exit_code(report)
 
     # mcp-scan

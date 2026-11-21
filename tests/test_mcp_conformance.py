@@ -276,6 +276,68 @@ class McpConformanceTests(unittest.TestCase):
             },
         )
 
+    def test_shipped_examples_have_documented_scores(self) -> None:
+        examples = ROOT / "examples" / "mcp-conformance"
+        passing = verify_manifest(examples / "passing.json")
+        self.assertEqual(passing["score"]["value"], 100)
+        self.assertEqual(passing["score"]["version"], "1")
+        self.assertIn("formula", passing["score"])
+        failing = verify_manifest(examples / "failing.json")
+        # 25 + 25 + 15 for the three dishonest tools, and no other deduction.
+        self.assertEqual(failing["score"]["value"], 35)
+        self.assertEqual(
+            failing["score"]["inputs"]["violations"],
+            {
+                "READ_ONLY_HINT_MISMATCH": 1,
+                "IDEMPOTENT_HINT_MISMATCH": 1,
+                "NON_DESTRUCTIVE_HINT_MISMATCH": 1,
+            },
+        )
+
+    def inconclusive_manifest(self, root: Path) -> Path:
+        path = self.manifest(
+            root,
+            [
+                {"id": f"plain-{index}", "tool": "unannotated_note"}
+                for index in range(3)
+            ],
+        )
+        value = json.loads(path.read_text())
+        value["policy"]["minimumToolCoverage"] = 0
+        path.write_text(json.dumps(value), encoding="utf-8")
+        return path
+
+    def test_a_fully_inconclusive_run_scores_well_below_a_clean_pass(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = self.inconclusive_manifest(Path(directory))
+            report = verify_manifest(path)
+            self.assertEqual(report["verdict"], "inconclusive")
+            self.assertEqual(report["score"]["value"], 70)
+            self.assertEqual(report["score"]["inputs"]["inconclusiveCases"], 3)
+
+    def test_min_score_gate_turns_an_unverifiable_run_into_a_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = self.inconclusive_manifest(root)
+            report_path = root / "report.json"
+            # Without the gate this run exits 3 (inconclusive).
+            self.assertEqual(
+                cli_main(["mcp-verify", str(path), "--out", str(report_path)]), 3
+            )
+            exit_code = cli_main(
+                [
+                    "mcp-verify",
+                    str(path),
+                    "--out",
+                    str(report_path),
+                    "--min-score",
+                    "95",
+                ]
+            )
+            self.assertEqual(exit_code, 2)
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+            self.assertLess(report["score"]["value"], 95)
+
     def test_reports_are_valid_xml_and_sarif(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
