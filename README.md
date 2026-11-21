@@ -162,6 +162,16 @@ Ambiguous-result schedules (`ambiguousResultFault`) repeat a call under
 committed-result-lost, no-effect-timeout, duplicate-on-retry, or explicitly
 unclassified.
 
+## Trust score
+
+Every report also carries `score: {value, version, formula, inputs}`: 100 minus
+weighted deductions for mismatches, inconclusive cases, coverage shortfall below
+the declared policy, and a fatal error (floored at 0). The weights and the
+versioned formula are in
+[the conformance guide](docs/MCP_CONFORMANCE.md#trust-score). `--min-score N`
+fails the run when the score is below `N`, so a single number can gate CI or feed
+a badge.
+
 ## Validation against real servers
 
 Measured on 2026-11-21 with the released upstream servers, `safesink mcp-check`,

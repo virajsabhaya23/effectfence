@@ -26,6 +26,24 @@ from .observers import (
 REPORT_SCHEMA = "effectfence.mcp.report.v1"
 MANIFEST_SCHEMA = "effectfence.mcp.v1"
 
+# The score is part of the contract: badges, leaderboards and agent gates all
+# consume one number, so the weights are named here and the formula is versioned.
+# A lie about a claim is the worst finding, an error mismatch is next, an
+# unverifiable case is never free, and an unobserved tool is a coverage gap.
+SCORE_VERSION = "1"
+SCORE_VIOLATION_WEIGHTS = {
+    "READ_ONLY_HINT_MISMATCH": 25,
+    "IDEMPOTENT_HINT_MISMATCH": 25,
+    "NON_DESTRUCTIVE_HINT_MISMATCH": 15,
+    "CLOSED_WORLD_HINT_MISMATCH": 15,
+    "TOOL_ERROR_EXPECTATION_MISMATCH": 10,
+    "RETRY_TOOL_ERROR_EXPECTATION_MISMATCH": 10,
+    "AMBIGUOUS_RESULT_DUPLICATE_ON_RETRY": 20,
+}
+SCORE_DEFAULT_VIOLATION_WEIGHT = 10
+SCORE_INCONCLUSIVE_WEIGHT = 10
+SCORE_COVERAGE_WEIGHT = 20
+
 
 class ManifestError(ValueError):
     pass
@@ -224,8 +242,59 @@ def verify_manifest(
         "cases": results,
         "limitations": _limitations(observer_summary),
     }
+    report["score"] = _score(
+        results, coverage_ratio, required_coverage, policy_violations, fatal_error
+    )
     report["certificateSha256"] = canonical_digest(report)
     return report
+
+
+def _score(
+    results: list[dict[str, Any]],
+    coverage_ratio: float,
+    required_coverage: float,
+    policy_violations: list[dict[str, Any]],
+    fatal_error: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Derive one comparable number from evidence, never from optimism."""
+    violation_counts: dict[str, int] = {}
+    for case in results:
+        for violation in case.get("violations", []):
+            code = str(violation.get("code", "UNKNOWN"))
+            violation_counts[code] = violation_counts.get(code, 0) + 1
+        for violation in policy_violations:
+            code = str(violation.get("code", "UNKNOWN"))
+            violation_counts[code] = violation_counts.get(code, 0) + 1
+    inconclusive = sum(1 for case in results if case.get("inconclusive"))
+    violation_points = sum(
+        SCORE_VIOLATION_WEIGHTS.get(code, SCORE_DEFAULT_VIOLATION_WEIGHT) * count
+        for code, count in violation_counts.items()
+    )
+    inconclusive_points = SCORE_INCONCLUSIVE_WEIGHT * inconclusive
+    # Only the shortfall against the declared policy is a deduction: a curated
+    # manifest that deliberately covers 3 of 7 tools has not failed its contract.
+    coverage_shortfall = max(0.0, required_coverage - coverage_ratio)
+    coverage_points = round(SCORE_COVERAGE_WEIGHT * coverage_shortfall, 2)
+    fatal_points = 25 if fatal_error else 0
+    value = max(0, round(100 - violation_points - inconclusive_points - coverage_points - fatal_points))
+    return {
+        "value": value,
+        "version": SCORE_VERSION,
+        "formula": (
+            "100 - 25*READ_ONLY/IDEMPOTENT mismatch - 15*NON_DESTRUCTIVE/CLOSED_WORLD "
+            "mismatch - 10*other violation - 20*AMBIGUOUS_RESULT_DUPLICATE_ON_RETRY "
+            "- 10*inconclusive case - 20*coverage shortfall below policy "
+            "- 25*fatal error, floored at 0"
+        ),
+        "inputs": {
+            "violations": violation_counts,
+            "inconclusiveCases": inconclusive,
+            "coverageRatio": round(coverage_ratio, 6),
+            "requiredCoverage": required_coverage,
+            "requiredCoverage": required_coverage,
+            "fatalError": fatal_error is not None,
+        },
+    }
 
 
 def _unbudgeted_case(case: dict[str, Any]) -> dict[str, Any]:
