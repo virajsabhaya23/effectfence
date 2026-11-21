@@ -694,18 +694,33 @@ def _run_audit(parser: argparse.ArgumentParser, arguments: argparse.Namespace) -
     out_dir = Path(arguments.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     rows: list[dict] = []
+    skipped: list[dict] = []
     for path in paths:
         try:
             configured = load_host_config(path)
         except HostConfigError as error:
-            _die(parser, str(error))
-            return 2
+            if arguments.config:
+                # A path the user named explicitly must not be silently dropped.
+                _die(parser, str(error))
+                return 2
+            # Discovered configs are best effort: a file for another client
+            # must not stop the servers we can read.
+            skipped.append({"config": str(path), "reason": str(error)})
+            continue
         for name, server in configured.items():
             if arguments.server and name not in arguments.server:
                 continue
             rows.append(_audit_one(arguments, out_dir, path, server))
     if not rows:
-        _die(parser, "no configured servers matched --server")
+        _die(
+            parser,
+            "no configured servers matched --server"
+            if arguments.server
+            else "no readable MCP servers were found in the discovered configs",
+            hint=("pass --config path/to/config.json - " + skipped[0]["reason"])
+            if skipped
+            else None,
+        )
         return 2
     failures = [row for row in rows if row.get("verdict") != "pass"]
     print(
@@ -713,6 +728,7 @@ def _run_audit(parser: argparse.ArgumentParser, arguments: argparse.Namespace) -
             {
                 "configs": [str(path) for path in paths],
                 "servers": rows,
+                "skippedConfigs": skipped,
                 "passed": len(rows) - len(failures),
                 "needsAttention": len(failures),
             },
