@@ -5,10 +5,24 @@ All notable changes will be documented here. This project follows Semantic Versi
 ## 0.3.0 - 2026-08-29
 
 - Renamed distribution to `safesink` (clean break from `effectfence` per issue #1). `pip install safesink`, `import safesink`, CLI `safesink`. `effectfence` remains as a deprecated alias (`import effectfence` warns, `effectfence` CLI forwards to `safesink`). Strategy `safesink` is an alias for `effectfence`; env vars `SAFESINK_*` preferred with `EFFECTFENCE_*` fallback.
-- New package `safesink` mirrors `effectfence` 0.2.x; wheel now contains both for transition. `CITATION.cff` and `pyproject.toml` point to `virajsabhaya23/safesink`.
+- New package `safesink` mirrors `effectfence` 0.2.x; wheel now contains both for transition. `CITATION.cff` and `pyproject.toml` point at `virajsabhaya23/effectfence`, the repository that hosts this code.
 
 ## Unreleased
 
+- Split the product in two: `safesink` now exposes only the MCP conformance
+  verifier (`mcp-verify`, `mcp-scan`, `citation`). The crash/retry simulator,
+  SQLite effect ledger, reference sinks, benchmark corpus, and live
+  Kafka/PostgreSQL adapter moved to the frozen `safesink.legacy` subpackage and
+  are reachable through the separate `safesink-legacy` console script. See
+  `docs/FROZEN_CRASH_RETRY.md`.
+- Fixed the broken distribution metadata: `pyproject.toml` and the wheel
+  metadata point at the repository that actually exists
+  (`github.com/virajsabhaya23/effectfence`) instead of the nonexistent
+  `virajsabhaya23/safesink`, and the README no longer tells readers to run a
+  `pip install safesink` that 404s (the name is not on PyPI yet).
+- MCP reports no longer hardcode version `0.2.0`. The JSON report's
+  `runtime.version`, the SARIF driver version, the MCP `clientInfo` version, and
+  the citation metadata now all read `safesink.__version__`.
 - Added `--version` to the CLI (works as `safesink --version`, `python -m safesink
   --version`, and through the deprecated `effectfence` alias, which reports the
   program name it was invoked as).

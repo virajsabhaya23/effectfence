@@ -23,7 +23,19 @@ class BuildBackendTests(unittest.TestCase):
                     "safesink-0.3.0.dist-info/entry_points.txt"
                 ).decode()
         self.assertIn("safesink = safesink.cli:main", entry_points)
+        self.assertIn("safesink-legacy = safesink.legacy.cli:main", entry_points)
         self.assertIn("effectfence = effectfence.cli:main", entry_points)
+
+    def test_metadata_points_at_the_real_repository(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            wheel = Path(directory) / build_backend.build_wheel(directory)
+            with zipfile.ZipFile(wheel) as archive:
+                metadata = archive.read("safesink-0.3.0.dist-info/METADATA").decode()
+        self.assertIn(
+            "Project-URL: Repository, https://github.com/virajsabhaya23/effectfence",
+            metadata,
+        )
+        self.assertNotIn("virajsabhaya23/safesink", metadata)
 
     def test_wheel_is_reproducible_and_contains_schema_and_license(self) -> None:
         with tempfile.TemporaryDirectory() as first, tempfile.TemporaryDirectory() as second:
@@ -39,6 +51,7 @@ class BuildBackendTests(unittest.TestCase):
                 self.assertIn(
                     "safesink/schemas/mcp-manifest-v1.schema.json", names
                 )
+                self.assertIn("safesink/legacy/simulator.py", names)
                 self.assertIn("safesink-0.3.0.dist-info/LICENSE", names)
                 metadata = archive.read("safesink-0.3.0.dist-info/METADATA")
                 self.assertIn(b"Version: 0.3.0", metadata)
@@ -56,6 +69,12 @@ class BuildBackendTests(unittest.TestCase):
             self.assertIn("safesink-0.3.0/build_backend.py", names)
             self.assertIn("safesink-0.3.0/pyproject.toml", names)
             self.assertFalse(any(".egg-info/" in name for name in names))
+            # ``python -m build`` refuses an sdist without PKG-INFO, which would
+            # break the PyPI release job before it ever uploads anything.
+            with tarfile.open(source) as archive:
+                metadata = archive.extractfile("safesink-0.3.0/PKG-INFO")
+                self.assertIsNotNone(metadata)
+                self.assertIn(b"Version: 0.3.0", metadata.read())
 
 
 if __name__ == "__main__":

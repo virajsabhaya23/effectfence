@@ -1,19 +1,19 @@
 # MCP side-effect conformance
 
-EffectFence starts an MCP server over `stdio`, reads its `tools/list` metadata,
+SafeSink starts an MCP server over `stdio`, reads its `tools/list` metadata,
 calls selected tools, and compares the declared effect hints with state changes
 seen by explicitly configured observers. It is intended for MCP server authors,
 platform teams, security reviewers, and CI maintainers.
 
 MCP tool annotations are hints and must be treated as untrusted unless the server
-itself is trusted. EffectFence supplies dynamic, observer-bounded evidence; it
+itself is trusted. SafeSink supplies dynamic, observer-bounded evidence; it
 does not turn those hints into a universal security boundary.
 
 ## Quick start
 
 ```bash
 python -m pip install .
-effectfence mcp-verify examples/mcp-conformance/passing.json \
+safesink mcp-verify examples/mcp-conformance/passing.json \
   --out out/mcp/report.json \
   --junit out/mcp/junit.xml \
   --sarif out/mcp/report.sarif
@@ -23,15 +23,15 @@ The intentionally bad fixture demonstrates the failure rules and exits with
 status 2:
 
 ```bash
-effectfence mcp-verify examples/mcp-conformance/failing.json \
+safesink mcp-verify examples/mcp-conformance/failing.json \
   --out out/mcp/failing.json
 ```
 
 ## Manifest
 
 The versioned schema is
-[`effectfence/schemas/mcp-manifest-v1.schema.json`](../effectfence/schemas/mcp-manifest-v1.schema.json).
-Commands are arrays and are executed directly; EffectFence never invokes a
+[`safesink/schemas/mcp-manifest-v1.schema.json`](../safesink/schemas/mcp-manifest-v1.schema.json).
+Commands are arrays and are executed directly; SafeSink never invokes a
 shell.
 
 ```json
@@ -80,7 +80,7 @@ each declaration source as `mcp-tool-annotation` or `manifest-contract`.
 | `idempotentHint: true` | The same tool and arguments change observed state again on retry |
 | `openWorldHint: false` | A configured open-world observer changes |
 
-EffectFence also fails unexpected MCP tool errors, unknown tools, execution
+SafeSink also fails unexpected MCP tool errors, unknown tools, execution
 errors, and tool-coverage policy violations.
 
 ### Ambiguous result retries
@@ -121,15 +121,15 @@ reports. Only argument keys/types and MCP content types are retained.
 ## Python integration
 
 ```python
-from effectfence import verify_manifest
+from safesink import verify_manifest
 
-report = verify_manifest("effectfence.mcp.json")
+report = verify_manifest("safesink.mcp.json")
 if report["verdict"] != "pass":
     raise RuntimeError(report["cases"])
 ```
 
 The API returns the same JSON-serializable report used by the CLI. JUnit and
-SARIF writers are available from `effectfence.mcp_reports`.
+SARIF writers are available from `safesink.mcp_reports`.
 
 ## CI integration
 
@@ -137,12 +137,12 @@ This repository includes a composite GitHub Action. A consuming repository can
 pin a released commit or tag:
 
 ```yaml
-- uses: virajsabhaya23/effectfence@v0.2.0
+- uses: virajsabhaya23/effectfence@main
   with:
-    manifest: effectfence.mcp.json
-    out: out/effectfence/report.json
-    junit: out/effectfence/junit.xml
-    sarif: out/effectfence/report.sarif
+    manifest: safesink.mcp.json
+    out: out/safesink/report.json
+    junit: out/safesink/junit.xml
+    sarif: out/safesink/report.sarif
 ```
 
 Pin a full commit SHA in high-assurance environments. Preserve the JSON report

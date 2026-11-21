@@ -1,14 +1,14 @@
 import json, sqlite3, tempfile, unittest
 from dataclasses import replace
 from pathlib import Path
-from safesink.io import load
-from safesink.simulator import verify_scenario
-from safesink.explore import explore, minimize_failure
-from safesink.benchmark import run
-from safesink.ledger import EffectLedger
-from safesink.sinks import DbApiSink
-from safesink.httpdemo import start, Handler
-from safesink.sinks import HttpSink
+from safesink.legacy.io import load
+from safesink.legacy.simulator import verify_scenario
+from safesink.legacy.explore import explore, minimize_failure
+from safesink.legacy.benchmark import run
+from safesink.legacy.ledger import EffectLedger
+from safesink.legacy.sinks import DbApiSink
+from safesink.legacy.httpdemo import start, Handler
+from safesink.legacy.sinks import HttpSink
 ROOT=Path(__file__).parents[1]
 class T(unittest.TestCase):
  def test_safesink_crash_safe(self): self.assertTrue(verify_scenario(load(str(ROOT/'examples/safe_fenced_recovery.json')))['safe'])

@@ -41,12 +41,12 @@ jobs:
         run: |
           safesink --version
           effectfence --version
-          safesink verify examples/safe_fenced_recovery.json
-          effectfence verify examples/safe_fenced_recovery.json
+          safesink-legacy verify examples/safe_fenced_recovery.json
+          safesink-legacy --version
       - name: Unit tests
         run: python -m unittest discover -s tests -v
       - name: Benchmark corpus (30 cases)
-        run: python -m safesink benchmark benchmark/corpus.json --out benchmark/results.json
+        run: python -m safesink.legacy.cli benchmark benchmark/corpus.json --out benchmark/results.json
       - name: Keep benchmark results
         if: always() && matrix.python-version == '3.12'
         uses: actions/upload-artifact@v7
@@ -86,8 +86,8 @@ jobs:
           expected="safesink $installed_version"
           echo "reported: $reported"
           test "$reported" = "$expected"
-          "$venv/safesink" verify examples/safe_fenced_recovery.json
+          "$venv/safesink-legacy" verify examples/safe_fenced_recovery.json
           status=0
-          "$venv/safesink" verify examples/crash_after_effect.json || status=$?
+          "$venv/safesink-legacy" verify examples/crash_after_effect.json || status=$?
           echo "unsafe fixture exit status: $status"
           test "$status" -eq 2

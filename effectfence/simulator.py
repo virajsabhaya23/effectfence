@@ -1,3 +1,3 @@
-"""Deprecated alias of :mod:`safesink.simulator` (EffectFence compatibility shim)."""
+"""Deprecated alias of :mod:`safesink.legacy.simulator` (EffectFence compatibility shim)."""
 
-from safesink.simulator import *  # noqa: F401,F403
+from safesink.legacy.simulator import *  # noqa: F401,F403

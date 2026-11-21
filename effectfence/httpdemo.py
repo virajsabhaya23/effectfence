@@ -1,3 +1,3 @@
-"""Deprecated alias of :mod:`safesink.httpdemo` (EffectFence compatibility shim)."""
+"""Deprecated alias of :mod:`safesink.legacy.httpdemo` (EffectFence compatibility shim)."""
 
-from safesink.httpdemo import *  # noqa: F401,F403
+from safesink.legacy.httpdemo import *  # noqa: F401,F403

@@ -21,15 +21,27 @@ from safesink.cli import main as safesink_main
 
 ROOT = Path(__file__).parents[1]
 # ``cli`` and ``__init__`` intentionally differ; ``schemas`` ships a data file.
-ALIASED_MODULES = sorted(
+# ``legacy`` is the frozen crash/retry half, re-exported from one subpackage.
+PRIMARY_MODULES = {
     module.name
     for module in pkgutil.iter_modules(safesink.__path__)
-    if module.name not in {"__main__", "cli", "schemas"}
-)
+    if module.name not in {"__main__", "cli", "schemas", "legacy"}
+}
+LEGACY_MODULES = {
+    module.name
+    for module in pkgutil.iter_modules([str(ROOT / "safesink" / "legacy")])
+    if module.name != "cli"
+}
+ALIASED_MODULES = sorted(PRIMARY_MODULES | LEGACY_MODULES)
 
 
 def public_names(module: object) -> list[str]:
     return sorted(name for name in vars(module) if not name.startswith("_"))
+
+
+def target_module(name: str) -> str:
+    prefix = "safesink.legacy" if name in LEGACY_MODULES else "safesink"
+    return f"{prefix}.{name}"
 
 
 def project_version() -> str:
@@ -49,9 +61,13 @@ class VersionTests(unittest.TestCase):
 
 
 class DeprecatedAliasTests(unittest.TestCase):
-    def test_alias_covers_every_primary_module(self) -> None:
-        self.assertIn("mcp_verifier", ALIASED_MODULES)
-        self.assertIn("simulator", ALIASED_MODULES)
+    def test_primary_package_is_mcp_only(self) -> None:
+        self.assertIn("mcp_verifier", PRIMARY_MODULES)
+        self.assertIn("mcp_scan", PRIMARY_MODULES)
+        self.assertNotIn("simulator", PRIMARY_MODULES)
+
+    def test_alias_covers_every_primary_and_frozen_module(self) -> None:
+        self.assertIn("simulator", LEGACY_MODULES)
         self.assertEqual(
             ALIASED_MODULES,
             sorted(
@@ -64,7 +80,7 @@ class DeprecatedAliasTests(unittest.TestCase):
     def test_alias_reexports_the_identical_objects(self) -> None:
         for name in ALIASED_MODULES:
             with self.subTest(module=name):
-                target = importlib.import_module(f"safesink.{name}")
+                target = importlib.import_module(target_module(name))
                 shim = importlib.import_module(f"effectfence.{name}")
                 expected = public_names(target)
                 self.assertGreater(len(expected), 0)
@@ -97,24 +113,29 @@ class DeprecatedAliasTests(unittest.TestCase):
         # warning, so each script must resolve through its own module.
         pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
         self.assertIn('safesink = "safesink.cli:main"', pyproject)
+        self.assertIn('safesink-legacy = "safesink.legacy.cli:main"', pyproject)
         self.assertIn('effectfence = "effectfence.cli:main"', pyproject)
 
     def test_deprecated_cli_warns_and_matches_the_primary_verdict(self) -> None:
-        fixture = str(ROOT / "examples" / "safe_fenced_recovery.json")
         with contextlib.redirect_stdout(io.StringIO()):
-            primary = safesink_main(["verify", fixture])
+            primary = safesink_main(["citation", "--format", "bibtex"])
             with self.assertWarns(DeprecationWarning):
-                alias = effectfence_main(["verify", fixture])
+                alias = effectfence_main(["citation", "--format", "bibtex"])
         self.assertEqual(primary, 0)
         self.assertEqual(alias, primary)
 
     def test_deprecated_cli_keeps_the_failure_exit_code(self) -> None:
-        fixture = str(ROOT / "examples" / "crash_after_effect.json")
-        with contextlib.redirect_stdout(io.StringIO()):
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore", DeprecationWarning)
-                alias = effectfence_main(["verify", fixture])
-        self.assertEqual(alias, 2)
+        missing = str(ROOT / "missing-manifest.json")
+        codes = []
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(
+            io.StringIO()
+        ), warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            for main in (safesink_main, effectfence_main):
+                with self.assertRaises(SystemExit) as raised:
+                    main(["mcp-verify", missing])
+                codes.append(raised.exception.code)
+        self.assertEqual(codes, [2, 2])
 
 
 if __name__ == "__main__":

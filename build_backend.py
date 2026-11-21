@@ -21,12 +21,12 @@ def _metadata() -> str:
     headers = f"""Metadata-Version: 2.3
 Name: {NAME}
 Version: {VERSION}
-Summary: Crash/retry and MCP side-effect conformance verifier (formerly EffectFence)
+Summary: MCP tool side-effect conformance verifier (formerly EffectFence)
 Author: Viraj Sabhaya
 License: Apache-2.0
 Requires-Python: >=3.10
 Description-Content-Type: text/markdown
-Keywords: mcp,model-context-protocol,idempotency,conformance,crash-recovery,safesink
+Keywords: mcp,model-context-protocol,conformance,side-effects,idempotency,safesink
 Classifier: Development Status :: 4 - Beta
 Classifier: Environment :: Console
 Classifier: Intended Audience :: Developers
@@ -36,9 +36,9 @@ Classifier: Programming Language :: Python :: 3
 Classifier: Programming Language :: Python :: 3 :: Only
 Classifier: Topic :: Software Development :: Quality Assurance
 Classifier: Topic :: Software Development :: Testing
-Project-URL: Homepage, https://github.com/virajsabhaya23/safesink
-Project-URL: Repository, https://github.com/virajsabhaya23/safesink
-Project-URL: Issues, https://github.com/virajsabhaya23/safesink/issues
+Project-URL: Homepage, https://github.com/virajsabhaya23/effectfence
+Project-URL: Repository, https://github.com/virajsabhaya23/effectfence
+Project-URL: Issues, https://github.com/virajsabhaya23/effectfence/issues
 Provides-Extra: live-kafka-postgres
 Requires-Dist: confluent-kafka>=2.5,<3; extra == "live-kafka-postgres"
 Requires-Dist: psycopg[binary]>=3.2,<4; extra == "live-kafka-postgres"
@@ -108,6 +108,7 @@ def build_wheel(
             f"{dist_info}/LICENSE": (root / "LICENSE").read_bytes(),
             f"{dist_info}/entry_points.txt": (
                 b"[console_scripts]\nsafesink = safesink.cli:main\n"
+                b"safesink-legacy = safesink.legacy.cli:main\n"
                 b"effectfence = effectfence.cli:main\n"
             ),
         }
@@ -133,6 +134,7 @@ def prepare_metadata_for_build_wheel(
     (directory / "WHEEL").write_text(_wheel_metadata(), encoding="utf-8")
     (directory / "entry_points.txt").write_text(
         "[console_scripts]\nsafesink = safesink.cli:main\n"
+        "safesink-legacy = safesink.legacy.cli:main\n"
         "effectfence = effectfence.cli:main\n",
         encoding="utf-8",
     )
@@ -164,4 +166,12 @@ def build_sdist(sdist_directory: str, config_settings: dict | None = None) -> st
             ):
                 continue
             archive.add(path, arcname=f"{DIST}/{path.relative_to(root)}")
+        # PEP 625/PEP 517: a source distribution must carry its metadata, or
+        # ``python -m build`` cannot turn the sdist back into a wheel.
+        metadata = _metadata().encode()
+        info = tarfile.TarInfo(f"{DIST}/PKG-INFO")
+        info.size = len(metadata)
+        info.mode = 0o644
+        info.mtime = int(os.environ.get("SOURCE_DATE_EPOCH", "315532800"))
+        archive.addfile(info, io.BytesIO(metadata))
     return name
