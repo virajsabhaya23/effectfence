@@ -11,7 +11,7 @@ from pathlib import Path
 
 
 NAME = "safesink"
-VERSION = "0.3.0"
+VERSION = "0.4.0"
 DIST = f"{NAME}-{VERSION}"
 WHEEL = f"{DIST}-py3-none-any.whl"
 

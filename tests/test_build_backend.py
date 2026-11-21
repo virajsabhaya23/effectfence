@@ -10,6 +10,8 @@ from pathlib import Path
 import build_backend
 import safesink
 
+DIST = f"safesink-{safesink.__version__}"
+
 
 class BuildBackendTests(unittest.TestCase):
     def test_backend_version_matches_the_package(self) -> None:
@@ -20,7 +22,7 @@ class BuildBackendTests(unittest.TestCase):
             wheel = Path(directory) / build_backend.build_wheel(directory)
             with zipfile.ZipFile(wheel) as archive:
                 entry_points = archive.read(
-                    "safesink-0.3.0.dist-info/entry_points.txt"
+                    f"{DIST}.dist-info/entry_points.txt"
                 ).decode()
         self.assertIn("safesink = safesink.cli:main", entry_points)
         self.assertIn("safesink-legacy = safesink.legacy.cli:main", entry_points)
@@ -30,7 +32,7 @@ class BuildBackendTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             wheel = Path(directory) / build_backend.build_wheel(directory)
             with zipfile.ZipFile(wheel) as archive:
-                metadata = archive.read("safesink-0.3.0.dist-info/METADATA").decode()
+                metadata = archive.read(f"{DIST}.dist-info/METADATA").decode()
         self.assertIn(
             "Project-URL: Repository, https://github.com/virajsabhaya23/effectfence",
             metadata,
@@ -52,9 +54,9 @@ class BuildBackendTests(unittest.TestCase):
                     "safesink/schemas/mcp-manifest-v1.schema.json", names
                 )
                 self.assertIn("safesink/legacy/simulator.py", names)
-                self.assertIn("safesink-0.3.0.dist-info/LICENSE", names)
-                metadata = archive.read("safesink-0.3.0.dist-info/METADATA")
-                self.assertIn(b"Version: 0.3.0", metadata)
+                self.assertIn(f"{DIST}.dist-info/LICENSE", names)
+                metadata = archive.read(f"{DIST}.dist-info/METADATA")
+                self.assertIn(f"Version: {safesink.__version__}".encode(), metadata)
                 self.assertIn(b"Description-Content-Type: text/markdown", metadata)
                 # legacy shim still shipped
                 self.assertIn(
@@ -66,15 +68,17 @@ class BuildBackendTests(unittest.TestCase):
             source = Path(directory) / build_backend.build_sdist(directory)
             with tarfile.open(source) as archive:
                 names = archive.getnames()
-            self.assertIn("safesink-0.3.0/build_backend.py", names)
-            self.assertIn("safesink-0.3.0/pyproject.toml", names)
+            self.assertIn(f"{DIST}/build_backend.py", names)
+            self.assertIn(f"{DIST}/pyproject.toml", names)
             self.assertFalse(any(".egg-info/" in name for name in names))
             # ``python -m build`` refuses an sdist without PKG-INFO, which would
             # break the PyPI release job before it ever uploads anything.
             with tarfile.open(source) as archive:
-                metadata = archive.extractfile("safesink-0.3.0/PKG-INFO")
+                metadata = archive.extractfile(f"{DIST}/PKG-INFO")
                 self.assertIsNotNone(metadata)
-                self.assertIn(b"Version: 0.3.0", metadata.read())
+                self.assertIn(
+                    f"Version: {safesink.__version__}".encode(), metadata.read()
+                )
 
 
 if __name__ == "__main__":
