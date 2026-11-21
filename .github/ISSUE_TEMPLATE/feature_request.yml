@@ -1,0 +1,38 @@
+name: Feature request
+description: Suggest a capability, an observer, or a workflow improvement
+title: "feature: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        SafeSink's rules are deliberately narrow: it only reports what it
+        observed, and `inconclusive` is never treated as a pass. Requests that
+        widen what can be *observed* are easiest to accept; requests to infer
+        effects without observing them usually are not.
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you unable to check today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would like
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What you do instead today
+  - type: input
+    id: server
+    attributes:
+      label: Server, transport or observer this concerns
+      placeholder: "streamable-http gateway, MongoDB observer, Kafka"
+  - type: checkboxes
+    id: honesty
+    attributes:
+      label: Fit with the design
+      options:
+        - label: This can be checked by observing state, not by trusting a declaration.

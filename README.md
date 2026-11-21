@@ -404,6 +404,13 @@ Exposes `lint_manifest` and `describe_rules` over MCP. `verify_manifest` (which
 starts the server under test) is only advertised and callable with
 `--allow-exec`. See [`docs/MCP_SERVER.md`](docs/MCP_SERVER.md).
 
+## Contributing
+
+Issues have templates: a bug report asks for the verdict and finding codes, and a
+false-positive report asks for the three inputs a verdict came from (arguments,
+observed delta, declaration). [`docs/ROADMAP.md`](docs/ROADMAP.md) says what is
+shipped, what is next, and what is deliberately not planned.
+
 ## Badge
 
 ```bash

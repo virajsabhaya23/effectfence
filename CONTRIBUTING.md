@@ -2,7 +2,11 @@
 
 Thank you for helping improve this project.
 
-1. Open an issue describing the problem, expected behavior, and a minimal synthetic example.
+1. Open an issue. Use the bug report template for a wrong verdict or crash, the
+   false-positive template when a clean tool was accused (it asks for the
+   synthesized arguments, the observed delta and the declaration - the three
+   inputs a verdict comes from), or the feature template for a capability.
+   Include a minimal synthetic example, never real data.
 2. Create a focused change with tests covering success, failure, and malformed-input behavior.
 3. Run `python scripts/format_check.py`, `python scripts/lint.py`,
    `python scripts/typecheck.py`, and `python -m unittest discover -s tests -v`.

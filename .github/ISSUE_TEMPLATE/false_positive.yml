@@ -1,0 +1,66 @@
+name: False positive
+description: A tool was accused of an effect it did not have, or a clean tool failed
+title: "false positive: "
+labels: ["false positive"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        To tell a synthesis bug from a real finding we need the three inputs the
+        verdict came from: the arguments SafeSink chose, the delta it observed,
+        and the declaration it compared against.
+  - type: input
+    id: version
+    attributes:
+      label: SafeSink version
+      placeholder: "0.5.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: source
+    attributes:
+      label: How were the arguments produced?
+      options:
+        - mcp-scan synthesized them
+        - I wrote them in the manifest
+        - a --contract override
+    validations:
+      required: true
+  - type: textarea
+    id: arguments
+    attributes:
+      label: Synthesized arguments
+      description: The case's `arguments` object.
+      render: json
+    validations:
+      required: true
+  - type: textarea
+    id: delta
+    attributes:
+      label: Observed delta
+      description: The `observations`/delta entries for the case - observer id, changed, destructive, digests.
+      render: json
+    validations:
+      required: true
+  - type: textarea
+    id: declaration
+    attributes:
+      label: Tool declaration
+      description: The tool's `annotations` block as the server advertises it (and the manifest `contract`, if present).
+      render: json
+    validations:
+      required: true
+  - type: textarea
+    id: annotated
+    attributes:
+      label: The tool itself
+      description: What the tool actually does when called this way, and why the observed delta is not an effect.
+    validations:
+      required: true
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: Checklist
+      options:
+        - label: The arguments do not touch real data and contain no secrets.
+          required: true
