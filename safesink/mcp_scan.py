@@ -75,8 +75,39 @@ _WEAK_PATH_TOKENS = {
 # Whole words only: "dir" as a substring matches "directories" in the allowed-path
 # boilerplate that file tools carry, which then sends a directory to read_file.
 _DIRECTORY_HINTS = ("directory", "directories", "folder", "folders", "tree", "walk")
-_DIRECTORY_NAMES = {"dir", "directory", "folder", "dir_path", "directory_path"}
-_DIRECTORY_TOOL_HINTS = ("list_", "tree", "search", "glob", "walk", "ls_")
+_DIRECTORY_NAMES = {
+    "dir",
+    "directory",
+    "folder",
+    "dir_path",
+    "directory_path",
+    "root",
+    "root_path",
+    "folder_path",
+}
+_DIRECTORY_NAME_TOKENS = {"dir", "directory", "directories", "folder", "folders", "tree"}
+_FILE_NAME_TOKENS = {
+    "file",
+    "files",
+    "filename",
+    "filepath",
+    "media",
+    "image",
+    "photo",
+    "picture",
+    "png",
+    "jpeg",
+    "jpg",
+}
+_DIRECTORY_TOOL_HINTS = (
+    "list_",
+    "tree",
+    "search",
+    "glob",
+    "walk",
+    "ls_",
+    "directory",
+)
 
 # Signals that a path argument names media rather than text.
 _MEDIA_HINTS = ("media", "image", "photo", "picture", "png", "jpeg", "jpg")
@@ -172,18 +203,31 @@ def _role(name: str) -> str:
     return "read"
 
 
+def _first_hint_position(text: str, hints: tuple[str, ...]) -> int | None:
+    lowered = text.lower()
+    positions = [lowered.find(hint) for hint in hints if hint in lowered]
+    return min(positions) if positions else None
+
+
 def _wants_directory(name: str, description: str, tool_name: str) -> bool:
+    # Explicit names always win, then the property name, then the tool's own
+    # purpose, and only then prose. Ranking before prose is what keeps
+    # search_files(path, "Directory to search for files") pointing at the seeded
+    # directory while read_text_file(path, "...a file...") still gets a file.
     if name.lower() in _DIRECTORY_NAMES:
         return True
-    property_text = f"{name} {description}".lower()
-    # A file noun wins: file tools mention "allowed directories" in their
-    # boilerplate, so testing for directory words first sends them a directory.
-    if "file" in property_text or any(hint in property_text for hint in _MEDIA_HINTS):
-        return False
-    if any(hint in property_text for hint in _DIRECTORY_HINTS):
+    tokens = _name_tokens(name)
+    if tokens & _DIRECTORY_NAME_TOKENS:
         return True
-    lowered_tool = tool_name.lower()
-    return any(hint in lowered_tool for hint in _DIRECTORY_TOOL_HINTS)
+    if tokens & _FILE_NAME_TOKENS:
+        return False
+    if any(hint in tool_name.lower() for hint in _DIRECTORY_TOOL_HINTS):
+        return True
+    directory_at = _first_hint_position(description, _DIRECTORY_HINTS)
+    file_at = _first_hint_position(description, ("file", *_MEDIA_HINTS))
+    if directory_at is None:
+        return False
+    return file_at is None or directory_at < file_at
 
 
 def _wants_media(name: str, description: str, tool_name: str) -> bool:
