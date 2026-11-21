@@ -7,9 +7,9 @@ released version and preserve the report's `certificateSha256`.
 Copy-ready metadata is available in three formats:
 
 ```bash
-effectfence citation --format bibtex
-effectfence citation --format cff
-effectfence citation --format json
+safesink citation --format bibtex
+safesink citation --format cff
+safesink citation --format json
 ```
 
 GitHub also reads the repository's [`CITATION.cff`](../CITATION.cff) and exposes

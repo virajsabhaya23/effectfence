@@ -1,17 +1,16 @@
 cff-version: 1.2.0
-title: "SafeSink: Crash/Retry and MCP Side-Effect Conformance Verifier (formerly EffectFence)"
-message: "If this software or its benchmark corpus contributes to your work, please cite it."
+title: "SafeSink: MCP Tool Side-Effect Conformance Verifier"
+message: "If this software contributes to your work, please cite it using this metadata."
 type: software
 authors:
   - family-names: Sabhaya
     given-names: Viraj
 version: 0.3.0
-date-released: 2026-08-29
 license: Apache-2.0
-repository-code: "https://github.com/virajsabhaya23/safesink"
+repository-code: "https://github.com/virajsabhaya23/effectfence"
 keywords:
   - model-context-protocol
-  - idempotency
-  - side-effects
+  - mcp
   - conformance-testing
-  - crash-recovery
+  - side-effects
+  - tool-annotations

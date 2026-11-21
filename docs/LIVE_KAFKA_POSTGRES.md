@@ -46,13 +46,13 @@ python -m pip install ".[live-kafka-postgres]"
 docker compose -f docker-compose.live.yml up -d --wait
 export EFFECTFENCE_POSTGRES_DSN='postgresql://effectfence:effectfence-local-only@127.0.0.1:5432/effectfence'
 
-effectfence live-kafka-postgres \
+safesink-legacy live-kafka-postgres \
   --strategy effectfence \
   --expect safe \
   --run-id local-safe \
   --broker-version-label apache/kafka:4.3.1
 
-effectfence live-kafka-postgres \
+safesink-legacy live-kafka-postgres \
   --strategy naive \
   --expect unsafe \
   --run-id local-naive-control \
