@@ -77,7 +77,7 @@ def write_junit_report(report: dict[str, Any], path: str | Path) -> None:
     infrastructure = []
     if report.get("fatalError"):
         infrastructure.append(
-            {"code": "FATAL_ERROR", "message": report["fatalError"]}
+            {"code": "FATAL_ERROR", "message": _fatal_text(report)}
         )
     infrastructure.extend(report.get("policyViolations", []))
     if infrastructure:
@@ -146,7 +146,7 @@ def write_sarif_report(report: dict[str, Any], path: str | Path) -> None:
             {
                 "ruleId": "FATAL_ERROR",
                 "level": "error",
-                "message": {"text": str(report["fatalError"])},
+                "message": {"text": _fatal_text(report)},
             }
         )
     # keep SARIF minimal but valid – GitHub code scanning expects rules even if results is empty
@@ -181,6 +181,18 @@ def write_sarif_report(report: dict[str, Any], path: str | Path) -> None:
     destination = Path(path)
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(json.dumps(sarif, indent=2) + "\n", encoding="utf-8")
+
+
+def _fatal_text(report: dict[str, Any]) -> str:
+    fatal = report.get("fatalError")
+    if not isinstance(fatal, dict):
+        return str(fatal)
+    parts = [str(fatal.get("message", "fatal error"))]
+    if fatal.get("phase"):
+        parts.append(f"phase={fatal['phase']}")
+    if fatal.get("case"):
+        parts.append(f"case={fatal['case']}")
+    return "; ".join(parts)
 
 
 def _failure_summary(violations: list[dict[str, Any]]) -> str:

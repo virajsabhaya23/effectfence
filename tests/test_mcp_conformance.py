@@ -30,6 +30,14 @@ ROOT = Path(__file__).resolve().parents[1]
 FIXTURE_SERVER = ROOT / "examples/mcp-conformance/fixture_server.py"
 RESET_FIXTURE = ROOT / "examples/mcp-conformance/reset_fixture.py"
 
+# Exits before MCP initialization, with a diagnostic and a secret on stderr.
+DEAD_SERVER = '''
+import sys
+sys.stderr.write("fatal: missing --db path\\n")
+sys.stderr.write("api_key=SUPERSECRET\\n")
+sys.exit(3)
+'''
+
 
 class McpConformanceTests(unittest.TestCase):
     def manifest(self, root: Path, cases: list[dict]) -> Path:
@@ -56,6 +64,32 @@ class McpConformanceTests(unittest.TestCase):
             "policy": {"minimumToolCoverage": min(1.0, len(cases) / 7)},
         }
         path = root / "manifest.json"
+        path.write_text(json.dumps(manifest), encoding="utf-8")
+        return path
+
+    def dead_manifest(self, root: Path, server: Path) -> Path:
+        state = root / "state"
+        state.mkdir(exist_ok=True)
+        manifest = {
+            "schemaVersion": "effectfence.mcp.v1",
+            "server": {
+                "transport": "stdio",
+                "command": [sys.executable, str(server)],
+                "cwd": str(root),
+                "startupTimeoutSeconds": 2,
+                "requestTimeoutSeconds": 2,
+            },
+            "observers": [
+                {
+                    "id": "state",
+                    "kind": "filesystem",
+                    "root": str(state),
+                    "sensitive": False,
+                }
+            ],
+            "cases": [{"id": "read", "tool": "read_note", "arguments": {}}],
+        }
+        path = root / "dead-manifest.json"
         path.write_text(json.dumps(manifest), encoding="utf-8")
         return path
 
@@ -571,6 +605,45 @@ class McpConformanceTests(unittest.TestCase):
             self.assertTrue(delta["digestsRedacted"])
             self.assertNotIn("beforeSha256", delta)
             self.assertNotIn("paths", delta)
+
+    def test_fatal_error_names_its_phase_without_stderr_by_default(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            server = root / "dead_server.py"
+            server.write_text(DEAD_SERVER, encoding="utf-8")
+            path = self.dead_manifest(root, server)
+            report = verify_manifest(path)
+            self.assertEqual(report["verdict"], "fail")
+            self.assertEqual(report["fatalError"]["phase"], "startup")
+            self.assertIsNone(report["fatalError"]["case"])
+            self.assertTrue(report["server"]["stderr_present"])
+            self.assertNotIn("stderrExcerpt", report["server"])
+            self.assertNotIn("SUPERSECRET", json.dumps(report))
+
+    def test_capture_stderr_includes_a_bounded_redacted_excerpt(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            server = root / "dead_server.py"
+            server.write_text(DEAD_SERVER, encoding="utf-8")
+            path = self.dead_manifest(root, server)
+            report = verify_manifest(path, capture_stderr=True)
+            excerpt = report["server"]["stderrExcerpt"]
+            self.assertIn("missing --db", excerpt)
+            self.assertNotIn("SUPERSECRET", excerpt)
+            self.assertIn("[redacted]", excerpt)
+            self.assertLessEqual(len(excerpt), 4000)
+
+    def test_manifest_can_request_stderr_capture(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            server = root / "dead_server.py"
+            server.write_text(DEAD_SERVER, encoding="utf-8")
+            path = self.dead_manifest(root, server)
+            value = json.loads(path.read_text())
+            value["server"]["captureStderr"] = True
+            path.write_text(json.dumps(value), encoding="utf-8")
+            report = verify_manifest(path)
+            self.assertIn("missing --db", report["server"]["stderrExcerpt"])
 
     def test_manifest_schema_is_packaged(self) -> None:
         schema = json.loads(

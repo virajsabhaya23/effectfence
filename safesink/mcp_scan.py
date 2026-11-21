@@ -437,6 +437,7 @@ def build_manifest(
     protocol_version: str = "2025-11-25",
     sqlite_queries: list[tuple[str, str]] | None = None,
     include_sandbox_observer: bool = False,
+    capture_stderr: bool = False,
 ) -> dict[str, Any]:
     """Turn advertised tools into a manifest, skipping tools we must not auto-call.
 
@@ -530,6 +531,8 @@ def build_manifest(
         server["inheritEnv"] = list(inherit_env)
     if env:
         server["env"] = dict(env)
+    if capture_stderr:
+        server["captureStderr"] = True
 
     return {
         "schemaVersion": "effectfence.mcp.v1",

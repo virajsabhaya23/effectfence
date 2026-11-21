@@ -224,6 +224,20 @@ pin a released commit or tag:
 Pin a full commit SHA in high-assurance environments. Preserve the JSON report
 as a CI artifact and use the process exit code as the merge gate.
 
+## Diagnosing a fatal error
+
+A run that cannot start the server, list its tools, or keep it alive records
+`fatalError` as `{message, phase, case}`. `phase` is `startup`, `tools/list` or
+`case`, and `case` names the case that was running, so a scan that dies on case
+31 does not read like one that never started.
+
+Server stderr is the usual explanation and is the usual place a credential
+leaks, so it is summarised as `server.stderr_present` by default. Pass
+`--capture-stderr` (or set `server.captureStderr` in the manifest) to add a
+bounded `server.stderrExcerpt`; it is truncated to 4 KB and values beside
+`token`, `secret`, `password`, `api_key`, `authorization` and `bearer` are
+replaced with `[redacted]` before it reaches the report.
+
 ## Evidence boundary
 
 The result is only as complete as the observer set. For example, a filesystem
