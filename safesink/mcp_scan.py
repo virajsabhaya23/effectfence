@@ -34,22 +34,41 @@ PROBE_URL = "https://example.com/"
 # observably, instead of on a syntax error.
 PROBE_SQL = "select 1 as probe"
 
-# Property names that should resolve to a sandbox path rather than a bare string.
-_PATH_HINTS = (
+# Property-name tokens that name a filesystem location on their own. Matching is
+# per token, not per substring: ``profile_id`` contains "file" but names an
+# identifier, and synthesizing it as a path makes the server reject the call.
+_PATH_NAME_TOKENS = {
     "path",
+    "paths",
     "file",
+    "files",
     "filename",
-    "directory",
+    "filenames",
+    "filepath",
+    "filepaths",
     "dir",
+    "dirs",
+    "directory",
+    "directories",
     "folder",
+    "folders",
     "location",
+    "locations",
+}
+# Tokens that describe a location only when they are the entire name ("source",
+# "destination") or sit beside a path noun ("source_path"). Inside a longer
+# identifier they usually mean something else: ``source_language`` and
+# ``target_audience`` are not files.
+_WEAK_PATH_TOKENS = {
     "source",
     "src",
     "destination",
     "dest",
     "dst",
     "target",
-)
+    "from",
+    "to",
+}
 
 # Signals that a path argument must be a directory; pointing a file at these
 # yields tool errors that look like conformance findings but are argument bugs.
@@ -137,8 +156,10 @@ def seed_sandbox(root: str | Path) -> bool:
 
 
 def _looks_like_path(name: str) -> bool:
-    lowered = name.lower()
-    return any(hint in lowered for hint in _PATH_HINTS)
+    tokens = _name_tokens(name)
+    if tokens & _PATH_NAME_TOKENS:
+        return True
+    return len(tokens) == 1 and tokens <= _WEAK_PATH_TOKENS
 
 
 def _role(name: str) -> str:
@@ -178,7 +199,10 @@ def _description_example(description: str) -> str | None:
 
 
 def _name_tokens(name: str) -> set[str]:
-    return set(re.findall(r"[a-z0-9]+", name.lower()))
+    # Split camelCase too, so ``fileUrl`` yields ``file`` and ``url`` rather than
+    # one opaque token that matches neither list.
+    spaced = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", name)
+    return set(re.findall(r"[a-z0-9]+", spaced.lower()))
 
 
 def _looks_like_url(name: str, schema: dict[str, Any]) -> bool:
