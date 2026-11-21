@@ -20,7 +20,12 @@ from safesink.mcp_reports import (
     write_junit_report,
     write_sarif_report,
 )
-from safesink.mcp_verifier import ManifestError, load_manifest, verify_manifest
+from safesink.mcp_verifier import (
+    ManifestError,
+    load_manifest,
+    load_suppressions,
+    verify_manifest,
+)
 from safesink.observers import (
     FilesystemObserver,
     HttpJsonObserver,
@@ -384,6 +389,132 @@ class McpConformanceTests(unittest.TestCase):
                 with self.assertRaises(SystemExit) as refused:
                     cli_main(["mcp-verify", str(path), "--new-only"])
             self.assertEqual(refused.exception.code, 2)
+
+    def test_a_reasoned_suppression_is_listed_and_keeps_the_run_green(self) -> None:
+        path = ROOT / "examples" / "mcp-conformance" / "failing.json"
+        suppressions = {
+            "suppressions": [
+                {
+                    "caseId": "detect-false-read-only-claim",
+                    "code": "READ_ONLY_HINT_MISMATCH",
+                    "reason": "documented compatibility shim, tracked in JIRA-12",
+                    "owner": "platform",
+                    "expires": "2999-01-01",
+                }
+            ]
+        }
+        report = verify_manifest(path, suppressions=suppressions)
+        self.assertEqual(report["suppressions"]["suppressedCount"], 1)
+        applied = report["suppressions"]["applied"][0]
+        self.assertEqual(applied["reason"], "documented compatibility shim, tracked in JIRA-12")
+        self.assertEqual(applied["owner"], "platform")
+        codes = [
+            violation["code"]
+            for case in report["cases"]
+            for violation in case["violations"]
+        ]
+        self.assertNotIn("READ_ONLY_HINT_MISMATCH", codes)
+        self.assertEqual(len(codes), 2)
+
+    def test_an_expired_suppression_is_itself_a_finding(self) -> None:
+        path = ROOT / "examples" / "mcp-conformance" / "failing.json"
+        suppressions = {
+            "suppressions": [
+                {
+                    "tool": "lying_read",
+                    "code": "READ_ONLY_HINT_MISMATCH",
+                    "reason": "temporary",
+                    "expires": "2000-01-01",
+                }
+            ]
+        }
+        report = verify_manifest(path, suppressions=suppressions)
+        self.assertEqual(report["suppressions"]["suppressedCount"], 0)
+        self.assertEqual(len(report["suppressions"]["expired"]), 1)
+        codes = [
+            violation["code"]
+            for case in report["cases"]
+            for violation in case["violations"]
+        ]
+        self.assertIn("SUPPRESSION_EXPIRED", codes)
+        self.assertEqual(report["verdict"], "fail")
+
+    def test_an_unmatched_suppression_is_reported_stale(self) -> None:
+        path = ROOT / "examples" / "mcp-conformance" / "failing.json"
+        suppressions = {
+            "suppressions": [
+                {
+                    "tool": "no_such_tool",
+                    "code": "READ_ONLY_HINT_MISMATCH",
+                    "reason": "stale entry",
+                    "expires": "2999-01-01",
+                }
+            ]
+        }
+        report = verify_manifest(path, suppressions=suppressions)
+        self.assertEqual(report["suppressions"]["suppressedCount"], 0)
+        self.assertEqual(
+            report["suppressions"]["unmatched"][0]["tool"], "no_such_tool"
+        )
+        self.assertEqual(report["verdict"], "fail")
+
+    def test_fail_on_suppressed_forbids_accepting_a_finding(self) -> None:
+        path = ROOT / "examples" / "mcp-conformance" / "failing.json"
+        suppressions = {
+            "suppressions": [
+                {
+                    "caseId": case_id,
+                    "code": code,
+                    "reason": "accepted",
+                    "expires": "2999-01-01",
+                }
+                for case_id, code in (
+                    ("detect-false-read-only-claim", "READ_ONLY_HINT_MISMATCH"),
+                    ("detect-non-idempotent-retry", "IDEMPOTENT_HINT_MISMATCH"),
+                    (
+                        "detect-false-non-destructive-claim",
+                        "NON_DESTRUCTIVE_HINT_MISMATCH",
+                    ),
+                )
+            ]
+        }
+        allowed = verify_manifest(path, suppressions=suppressions)
+        self.assertEqual(allowed["verdict"], "pass")
+        forbidden = verify_manifest(
+            path, suppressions=suppressions, fail_on_suppressed=True
+        )
+        self.assertEqual(forbidden["verdict"], "fail")
+        self.assertIn(
+            "SUPPRESSED_FINDINGS_NOT_ALLOWED",
+            [item["code"] for item in forbidden["policyViolations"]],
+        )
+
+    def test_suppression_entry_without_a_reason_or_expiry_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "suppressions.json"
+            path.write_text(
+                json.dumps({"suppressions": [{"tool": "x", "code": "Y"}]}),
+                encoding="utf-8",
+            )
+            with self.assertRaises(ManifestError):
+                load_suppressions(path)
+            path.write_text(
+                json.dumps(
+                    {
+                        "suppressions": [
+                            {
+                                "tool": "x",
+                                "code": "Y",
+                                "reason": "because",
+                                "expires": "not-a-date",
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaises(ManifestError):
+                load_suppressions(path)
 
     def test_reports_are_valid_xml_and_sarif(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

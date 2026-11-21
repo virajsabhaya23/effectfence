@@ -71,6 +71,9 @@ def verify_manifest(
     baseline: dict[str, Any] | None = None,
     baseline_path: str | Path | None = None,
     new_only: bool = False,
+    suppressions: dict[str, Any] | None = None,
+    suppression_path: str | Path | None = None,
+    fail_on_suppressed: bool = False,
 ) -> dict[str, Any]:
     # Imported lazily: this module is imported while ``safesink/__init__`` runs,
     # so the package version does not exist yet at module-import time.
@@ -177,6 +180,14 @@ def verify_manifest(
         if client:
             client.close()
 
+    suppression_info: dict[str, Any] | None = None
+    if suppressions is not None:
+        suppression_info = _apply_suppressions(results, suppressions)
+        suppression_info["path"] = (
+            str(suppression_path) if suppression_path else None
+        )
+        if fail_on_suppressed and suppression_info["suppressedCount"]:
+            suppression_info["failOnSuppressed"] = True
     baseline_info: dict[str, Any] | None = None
     if new_only:
         if baseline is None:
@@ -218,6 +229,13 @@ def verify_manifest(
         )
 
     # Three outcomes, because "could not verify" is neither a pass nor a finding.
+    if suppression_info and suppression_info.get("failOnSuppressed"):
+        policy_violations.append(
+            {
+                "code": "SUPPRESSED_FINDINGS_NOT_ALLOWED",
+                "message": "--fail-on-suppressed forbids accepting a finding, even with a reason",
+            }
+        )
     failed = (
         fatal_error is not None
         or bool(policy_violations)
@@ -256,6 +274,7 @@ def verify_manifest(
             "exhausted": budget_exhausted,
         },
         "baseline": baseline_info,
+        "suppressions": suppression_info,
         "observers": observer_summary,
         "cases": results,
         "limitations": _limitations(observer_summary),
@@ -312,6 +331,96 @@ def _score(
             "requiredCoverage": required_coverage,
             "fatalError": fatal_error is not None,
         },
+    }
+
+
+def _suppression_matches(
+    entry: dict[str, Any], case: dict[str, Any], code: str
+) -> bool:
+    if entry.get("code") != code:
+        return False
+    if "caseId" in entry:
+        return entry["caseId"] == case["id"]
+    if "tool" in entry:
+        return entry["tool"] == case.get("tool")
+    return False
+
+
+def _suppression_expired(expires: str, today: str) -> bool:
+    # ISO dates sort lexicographically, so this needs no date parsing heuristics.
+    return expires[:10] < today
+
+
+def _apply_suppressions(
+    results: list[dict[str, Any]], suppressions: dict[str, Any]
+) -> dict[str, Any]:
+    """Accept a finding only with a reason and an expiry, and never silently.
+
+    An expired entry is itself a finding, an entry that matches nothing is
+    reported stale, and every applied suppression is listed with its reason so a
+    reader can judge the acceptance rather than just see a green run.
+    """
+    from datetime import datetime, timezone
+
+    today = datetime.now(timezone.utc).date().isoformat()
+    entries = suppressions.get("suppressions", [])
+    used: set[int] = set()
+    applied: list[dict[str, Any]] = []
+    expired: list[dict[str, Any]] = []
+    for case in results:
+        remaining: list[dict[str, Any]] = []
+        for violation in case.get("violations", []):
+            match_index = next(
+                (
+                    index
+                    for index, entry in enumerate(entries)
+                    if _suppression_matches(entry, case, str(violation.get("code")))
+                ),
+                None,
+            )
+            if match_index is None:
+                remaining.append(violation)
+                continue
+            entry = entries[match_index]
+            if _suppression_expired(str(entry["expires"]), today):
+                expired.append(
+                    {
+                        "caseId": case["id"],
+                        "tool": case.get("tool"),
+                        "code": violation.get("code"),
+                        "expires": entry["expires"],
+                    }
+                )
+                remaining.append(
+                    {
+                        "code": "SUPPRESSION_EXPIRED",
+                        "message": (
+                            f"the suppression for {violation.get('code')} expired on "
+                            f"{entry['expires']}; renew it with a fresh reason or fix "
+                            "the finding"
+                        ),
+                    }
+                )
+                continue
+            used.add(match_index)
+            applied.append(
+                {
+                    "caseId": case["id"],
+                    "tool": case.get("tool"),
+                    "code": violation.get("code"),
+                    "reason": entry.get("reason"),
+                    "owner": entry.get("owner"),
+                    "expires": entry.get("expires"),
+                }
+            )
+        case["violations"] = remaining
+        case["passed"] = not remaining and not case.get("inconclusive")
+    unmatched = [entry for index, entry in enumerate(entries) if index not in used]
+    return {
+        "suppressedCount": len(applied),
+        "applied": applied,
+        "expired": expired,
+        "unmatched": unmatched,
     }
 
 
@@ -946,6 +1055,40 @@ def _run_hook(hook: dict[str, Any], base: Path, server_environment: dict[str, st
         raise ManifestError(
             f"hook exited with code {completed.returncode}; output omitted from report"
         )
+
+
+def load_suppressions(path: str | Path) -> dict[str, Any]:
+    """Validate a suppressions file. Every entry needs a reason and an expiry."""
+    from datetime import date
+
+    try:
+        value = json.loads(Path(path).read_text(encoding="utf-8"))
+    except OSError as error:
+        raise ManifestError(f"could not read suppressions: {error}") from error
+    except json.JSONDecodeError as error:
+        raise ManifestError(f"suppressions file is invalid JSON: {error}") from error
+    if not isinstance(value, dict) or not isinstance(value.get("suppressions"), list):
+        raise ManifestError("suppressions file must be an object with a suppressions array")
+    for index, entry in enumerate(value["suppressions"]):
+        label = f"suppressions[{index}]"
+        if not isinstance(entry, dict):
+            raise ManifestError(f"{label} must be an object")
+        if not isinstance(entry.get("code"), str) or not entry["code"]:
+            raise ManifestError(f"{label} requires a finding code")
+        if ("caseId" in entry) == ("tool" in entry):
+            raise ManifestError(f"{label} requires exactly one of caseId or tool")
+        if not isinstance(entry.get("reason"), str) or not entry["reason"].strip():
+            raise ManifestError(f"{label} requires a non-empty reason")
+        expires = entry.get("expires")
+        if not isinstance(expires, str):
+            raise ManifestError(f"{label} requires an ISO expiry date")
+        try:
+            date.fromisoformat(expires[:10])
+        except ValueError as error:
+            raise ManifestError(f"{label} expires must be YYYY-MM-DD") from error
+        if "owner" in entry and not isinstance(entry["owner"], str):
+            raise ManifestError(f"{label} owner must be a string")
+    return value
 
 
 def _validate_manifest(manifest: dict[str, Any]) -> None:

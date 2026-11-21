@@ -19,7 +19,12 @@ from .mcp_scan import (
     list_server_tools,
     write_manifest,
 )
-from .mcp_verifier import ManifestError, load_manifest, verify_manifest
+from .mcp_verifier import (
+    ManifestError,
+    load_manifest,
+    load_suppressions,
+    verify_manifest,
+)
 
 
 def _die(parser: argparse.ArgumentParser, message: str, *, hint: str | None = None) -> None:
@@ -113,6 +118,31 @@ def _load_baseline(
     if not isinstance(value, dict):
         _die(parser, "baseline report must be a JSON object")
     return value, path
+
+
+def _load_suppressions(
+    parser: argparse.ArgumentParser, path: str | None
+) -> tuple[dict | None, str | None]:
+    if not path:
+        return None, None
+    try:
+        return load_suppressions(path), path
+    except ManifestError as error:
+        _die(parser, str(error), hint="every entry needs a reason and a YYYY-MM-DD expiry")
+    return None, None
+
+
+def _add_suppression_options(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--suppress",
+        metavar="FILE.json",
+        help="accept specific findings with a reason and an expiry date",
+    )
+    parser.add_argument(
+        "--fail-on-suppressed",
+        action="store_true",
+        help="treat any accepted finding as a failure (high-assurance runs)",
+    )
 
 
 def _add_baseline_options(parser: argparse.ArgumentParser) -> None:
@@ -233,6 +263,7 @@ def build_parser(prog: str = "safesink") -> argparse.ArgumentParser:
     )
     _add_contract_options(check)
     _add_baseline_options(check)
+    _add_suppression_options(check)
     check.add_argument("--protocol-version", default="2025-11-25")
     check.add_argument("--startup-timeout", type=float, default=60.0)
     check.add_argument(
@@ -291,6 +322,7 @@ def build_parser(prog: str = "safesink") -> argparse.ArgumentParser:
         help="fail when the documented trust score is below this value (0-100)",
     )
     _add_baseline_options(mcp)
+    _add_suppression_options(mcp)
     mcp.add_argument("--verbose", action="store_true", help="print per-case verdicts")
     mcp.add_argument(
         "--capture-stderr",
@@ -433,6 +465,9 @@ def main(argv: list[str] | None = None, prog: str = "safesink") -> int:
         baseline, baseline_path = _load_baseline(
             parser, arguments.baseline, arguments.new_only
         )
+        suppressions, suppressions_path = _load_suppressions(
+            parser, arguments.suppress
+        )
         try:
             tools, server_info = list_server_tools(
                 arguments.command,
@@ -517,6 +552,9 @@ def main(argv: list[str] | None = None, prog: str = "safesink") -> int:
                 baseline=baseline,
                 baseline_path=baseline_path,
                 new_only=arguments.new_only,
+                suppressions=suppressions,
+                suppression_path=suppressions_path,
+                fail_on_suppressed=arguments.fail_on_suppressed,
             )
         except ScanError as error:
             _die(parser, str(error))
@@ -617,6 +655,9 @@ def main(argv: list[str] | None = None, prog: str = "safesink") -> int:
         baseline, baseline_path = _load_baseline(
             parser, arguments.baseline, arguments.new_only
         )
+        suppressions, suppressions_path = _load_suppressions(
+            parser, arguments.suppress
+        )
         try:
             report = verify_manifest(
                 arguments.manifest,
@@ -625,6 +666,9 @@ def main(argv: list[str] | None = None, prog: str = "safesink") -> int:
                 baseline=baseline,
                 baseline_path=baseline_path,
                 new_only=arguments.new_only,
+                suppressions=suppressions,
+                suppression_path=suppressions_path,
+                fail_on_suppressed=arguments.fail_on_suppressed,
             )
         except ManifestError as error:
             _die(parser, str(error), hint="see docs/MCP_CONFORMANCE.md#manifest")

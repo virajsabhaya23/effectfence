@@ -189,6 +189,28 @@ safesink mcp-verify safesink.mcp.json --baseline baseline.json --new-only
 Every suppressed finding is still listed with its case and code, and the JUnit
 report counts them, so adoption never hides what was accepted.
 
+## Accepted findings, with a reason and an expiry
+
+A baseline covers "not fixed yet". For an accepted risk, write a suppressions
+file - every entry needs a non-empty `reason` and an ISO `expires`:
+
+```json
+{"suppressions": [
+  {"tool": "delete_note", "code": "NON_DESTRUCTIVE_HINT_MISMATCH",
+   "reason": "soft delete kept for API compatibility", "owner": "platform",
+   "expires": "2026-06-30"}
+]}
+```
+
+```bash
+safesink mcp-verify safesink.mcp.json --suppress safesink.suppressions.json
+```
+
+An expired entry is itself a finding (`SUPPRESSION_EXPIRED`), an entry that
+matches nothing is reported stale, and every applied suppression is listed with
+its reason in the report. `--fail-on-suppressed` turns any acceptance into a
+failure for high-assurance runs.
+
 ## Trust score
 
 Every report also carries `score: {value, version, formula, inputs}`: 100 minus

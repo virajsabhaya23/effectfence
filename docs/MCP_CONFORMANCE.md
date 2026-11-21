@@ -248,6 +248,23 @@ SHA-256, and the JUnit report carries `baselineSuppressedCount` plus one
 baseline that was merely inconclusive cannot hide a violation the new run found:
 that violation is new.
 
+## Accepted findings
+
+A baseline says "not fixed yet"; a suppression says "accepted, deliberately".
+Pass `--suppress safesink.suppressions.json` with entries of
+`{caseId | tool, code, reason, expires, owner?}`. A suppression is valid only
+if `reason` is non-empty and `expires` is an ISO date (`YYYY-MM-DD`); the loader
+rejects anything else before the server starts.
+
+- Valid entries silence exactly that finding and are listed in
+  `report.suppressions.applied` with their reason, owner and expiry.
+- An expired entry does not silence anything: the original violation stays and a
+  `SUPPRESSION_EXPIRED` finding is added, so acceptance cannot rot quietly.
+- An entry that matches no finding is reported under `report.suppressions.unmatched`
+  rather than ignored, so the file stays honest.
+- `--fail-on-suppressed` adds `SUPPRESSED_FINDINGS_NOT_ALLOWED` and fails the run,
+  for a policy where nothing may be accepted.
+
 ## Trust score
 
 Every report carries `score: {value, version, formula, inputs}`. The score starts
