@@ -34,6 +34,9 @@ PROBE_URL = "https://example.com/"
 # observably, instead of on a syntax error.
 PROBE_SQL = "select 1 as probe"
 
+# The four MCP effect hints a contract may declare.
+HINT_NAMES = ("readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint")
+
 # Property-name tokens that name a filesystem location on their own. Matching is
 # per token, not per substring: ``profile_id`` contains "file" but names an
 # identifier, and synthesizing it as a path makes the server reject the call.
@@ -439,6 +442,8 @@ def build_manifest(
     include_sandbox_observer: bool = False,
     capture_stderr: bool = False,
     dry_run: bool = False,
+    contracts: dict[str, dict[str, bool]] | None = None,
+    contract_all: dict[str, bool] | None = None,
 ) -> dict[str, Any]:
     """Turn advertised tools into a manifest, skipping tools we must not auto-call.
 
@@ -509,9 +514,16 @@ def build_manifest(
         annotations = tool.get("annotations") or {}
         contract = {
             hint: annotations[hint]
-            for hint in ("readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint")
+            for hint in HINT_NAMES
             if isinstance(annotations.get(hint), bool)
         }
+        # A policy of our own: a blanket contract applies to every tool, and a
+        # per-tool contract overrides it. This is the only way an unannotated
+        # server can be verified without hand-writing a manifest.
+        if contract_all:
+            contract.update(contract_all)
+        if contracts and name in contracts:
+            contract.update(contracts[name])
         if contract:
             case["contract"] = contract
         if setup_command:
@@ -543,6 +555,13 @@ def build_manifest(
         "toolsAdvertised": len(tools),
         "probeFixtures": fixtures,
     }
+    if contract_all or contracts:
+        # Recorded so a reader never mistakes a user-supplied contract for the
+        # server's own declaration.
+        generated["userContracts"] = {
+            "all": dict(contract_all or {}),
+            "tools": {name: dict(value) for name, value in (contracts or {}).items()},
+        }
     if dry_run:
         generated["plan"] = plan_manifest(tools, cases, observers)
     return {

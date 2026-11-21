@@ -661,6 +661,92 @@ class BuildManifestTests(unittest.TestCase):
             self.assertIn("READ_ONLY_HINT_MISMATCH", codes)
             self.assertEqual(exit_code, 2)
 
+    def test_contracts_override_annotations_and_are_marked_user_supplied(self) -> None:
+        manifest = build_manifest(
+            [READ_TOOL],
+            command=["server"],
+            observer_root="/sandbox",
+            contracts={"read_file": {"readOnlyHint": False}},
+        )
+        self.assertEqual(manifest["cases"][0]["contract"]["readOnlyHint"], False)
+        self.assertEqual(
+            manifest["generated"]["userContracts"]["tools"],
+            {"read_file": {"readOnlyHint": False}},
+        )
+
+    def test_contract_all_applies_and_per_tool_overrides_it(self) -> None:
+        manifest = build_manifest(
+            [READ_TOOL, LIST_TOOL],
+            command=["server"],
+            observer_root="/sandbox",
+            contract_all={"readOnlyHint": False, "openWorldHint": False},
+            contracts={"list_directory": {"readOnlyHint": True}},
+        )
+        read_case, list_case = manifest["cases"]
+        self.assertEqual(read_case["contract"]["readOnlyHint"], False)
+        self.assertEqual(read_case["contract"]["openWorldHint"], False)
+        self.assertEqual(list_case["contract"]["readOnlyHint"], True)
+
+    def test_unknown_contract_hint_is_rejected_with_the_valid_names(self) -> None:
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            with self.assertRaises(SystemExit) as refused:
+                cli_main(
+                    [
+                        "mcp-check",
+                        "--contract",
+                        "read_file=readOnly:true",
+                        "--",
+                        sys.executable,
+                        "-c",
+                        "pass",
+                    ]
+                )
+        self.assertEqual(refused.exception.code, 2)
+        message = stderr.getvalue()
+        self.assertIn("readOnlyHint", message)
+        self.assertIn("openWorldHint", message)
+
+    def test_mcp_check_contract_verifies_a_declaration_the_server_did_not_make(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            database = root / "state.db"
+            connection = sqlite3.connect(database)
+            connection.execute("create table events(id integer primary key, message text)")
+            connection.commit()
+            connection.close()
+            server = root / "server.py"
+            server.write_text(SQLITE_FIXTURE_SERVER, encoding="utf-8")
+            report_path = root / "report.json"
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(
+                io.StringIO()
+            ):
+                exit_code = cli_main(
+                    [
+                        "mcp-check",
+                        "--out",
+                        str(report_path),
+                        "--sqlite-query",
+                        f"{database}=select id, message from events order by id",
+                        "--contract",
+                        "log_event=readOnlyHint:true",
+                        "--",
+                        sys.executable,
+                        str(server),
+                        str(database),
+                    ]
+                )
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+            case = next(item for item in report["cases"] if item["tool"] == "log_event")
+            self.assertEqual(
+                case["declarations"]["readOnlyHint"]["source"], "manifest-contract"
+            )
+            self.assertIn(
+                "READ_ONLY_HINT_MISMATCH",
+                [item["code"] for item in case["violations"]],
+            )
+            self.assertEqual(exit_code, 2)
+
     def test_dry_run_prints_the_plan_and_calls_nothing(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

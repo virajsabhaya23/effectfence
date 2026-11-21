@@ -224,6 +224,21 @@ pin a released commit or tag:
 Pin a full commit SHA in high-assurance environments. Preserve the JSON report
 as a CI artifact and use the process exit code as the merge gate.
 
+## Contracts for unannotated servers
+
+An unannotated tool is never called, because a pass would claim verification that
+did not happen. A contract supplies the policy instead: `--contract
+TOOL=hint:true|false,...` (repeatable) for one tool, `--contract-all
+hint:true|false` for every tool, with per-tool contracts overriding the blanket
+one. Only `readOnlyHint`, `destructiveHint`, `idempotentHint` and `openWorldHint`
+are accepted, and only as `true` or `false`; anything else is rejected before the
+server starts.
+
+The manifest records the supplied contracts under `generated.userContracts`, and
+the report marks those declarations with `source: "manifest-contract"`. That
+distinction is the point: a pass against a contract proves the tool matches the
+policy you chose, not that the server's own annotations are honest.
+
 ## Reviewing the plan first
 
 `--dry-run` on `mcp-check` or `mcp-scan` keeps the read-only half of a scan (start
