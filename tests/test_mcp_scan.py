@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import sqlite3
 import sys
@@ -77,6 +79,57 @@ for line in sys.stdin:
                 (request["params"]["arguments"].get("message", ""),),
             )
         connection.commit()
+        connection.close()
+        respond(request["id"], {
+            "content": [{"type": "text", "text": "done"}],
+            "isError": False,
+        })
+'''
+
+# A server that advertises one read-only tool and one destructive tool, so the
+# destructive-database guard has something to refuse.
+DESTRUCTIVE_DATABASE_SERVER = '''
+import json, sqlite3, sys
+
+DATABASE = sys.argv[1]
+TOOLS = [
+    {
+        "name": "list_events",
+        "annotations": {"readOnlyHint": True, "destructiveHint": False},
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "purge_events",
+        "annotations": {"readOnlyHint": False, "destructiveHint": True},
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+]
+
+
+def respond(request_id, result):
+    sys.stdout.write(json.dumps({"jsonrpc": "2.0", "id": request_id, "result": result}) + "\\n")
+    sys.stdout.flush()
+
+
+for line in sys.stdin:
+    request = json.loads(line)
+    if "id" not in request:
+        continue
+    method = request.get("method")
+    if method == "initialize":
+        respond(request["id"], {
+            "protocolVersion": "2025-11-25",
+            "capabilities": {"tools": {}},
+            "serverInfo": {"name": "destructive-fixture", "version": "1.0.0"},
+        })
+    elif method == "tools/list":
+        respond(request["id"], {"tools": TOOLS})
+    elif method == "tools/call":
+        name = request["params"]["name"]
+        connection = sqlite3.connect(DATABASE)
+        if name == "purge_events":
+            connection.execute("delete from events")
+            connection.commit()
         connection.close()
         respond(request["id"], {
             "content": [{"type": "text", "text": "done"}],
@@ -565,6 +618,79 @@ class BuildManifestTests(unittest.TestCase):
             ]
             self.assertIn("READ_ONLY_HINT_MISMATCH", codes)
             self.assertEqual(exit_code, 2)
+
+    def test_include_destructive_refuses_a_real_database_without_a_sandbox(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            database = root / "orders.db"
+            connection = sqlite3.connect(database)
+            connection.execute("create table events(id integer primary key)")
+            connection.execute("insert into events default values")
+            connection.commit()
+            connection.close()
+            server = root / "server.py"
+            server.write_text(DESTRUCTIVE_DATABASE_SERVER, encoding="utf-8")
+            report_path = root / "report.json"
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                with self.assertRaises(SystemExit) as refused:
+                    cli_main(
+                        [
+                            "mcp-check",
+                            "--out",
+                            str(report_path),
+                            "--sqlite-query",
+                            f"{database}=select id from events",
+                            "--include-destructive",
+                            "--",
+                            sys.executable,
+                            str(server),
+                            str(database),
+                        ]
+                    )
+            self.assertEqual(refused.exception.code, 2)
+            message = stderr.getvalue()
+            self.assertIn("purge_events", message)
+            self.assertIn(str(database), message)
+            self.assertIn("--allow-unobserved-mutations", message)
+            self.assertFalse(report_path.exists())
+            connection = sqlite3.connect(database)
+            try:
+                remaining = connection.execute("select count(*) from events").fetchone()[0]
+            finally:
+                connection.close()
+            self.assertEqual(remaining, 1)
+
+    def test_unobserved_mutations_can_be_allowed_explicitly(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            database = root / "orders.db"
+            connection = sqlite3.connect(database)
+            connection.execute("create table events(id integer primary key)")
+            connection.execute("insert into events default values")
+            connection.commit()
+            connection.close()
+            server = root / "server.py"
+            server.write_text(DESTRUCTIVE_DATABASE_SERVER, encoding="utf-8")
+            report_path = root / "report.json"
+            exit_code = cli_main(
+                [
+                    "mcp-check",
+                    "--out",
+                    str(report_path),
+                    "--sqlite-query",
+                    f"{database}=select id from events",
+                    "--include-destructive",
+                    "--allow-unobserved-mutations",
+                    "--",
+                    sys.executable,
+                    str(server),
+                    str(database),
+                ]
+            )
+            self.assertEqual(exit_code, 0)
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+            self.assertIn("purge_events-destructive", [c["id"] for c in report["cases"]])
 
     def test_manifest_is_written_deterministically(self) -> None:
         manifest = build_manifest(
