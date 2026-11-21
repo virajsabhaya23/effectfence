@@ -10,6 +10,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from .http_transport import McpHttpClient
 from .mcp_client import McpClientError, McpStdioClient, restricted_environment
 from .observers import (
     Delta,
@@ -500,8 +501,23 @@ def _apply_baseline(
 
 def _new_client(
     server: dict[str, Any], server_cwd: Path, environment: dict[str, str]
-) -> McpStdioClient:
+) -> Any:
     """Construct a client without starting it, so a failed start keeps stderr."""
+    if server.get("transport", "stdio") == "streamable-http":
+        return McpHttpClient(
+            str(server["url"]),
+            headers_from_env=_string_map(server.get("headersFromEnv", {}), "server.headersFromEnv"),
+            allowed_hosts=tuple(
+                _string_list(
+                    server.get("allowedHosts", ["127.0.0.1", "localhost", "::1"]),
+                    "server.allowedHosts",
+                )
+            ),
+            protocol_version=str(server.get("protocolVersion", "2025-11-25")),
+            timeout_seconds=float(server.get("requestTimeoutSeconds", 30)),
+            startup_timeout_seconds=float(server.get("startupTimeoutSeconds", 15)),
+            max_response_bytes=int(server.get("maxMessageBytes", 8 * 1024 * 1024)),
+        )
     return McpStdioClient(
         list(server["command"]),
         cwd=server_cwd,
@@ -1147,9 +1163,19 @@ def _validate_manifest(manifest: dict[str, Any]) -> None:
     server = manifest.get("server")
     if not isinstance(server, dict):
         raise ManifestError("server must be an object")
-    _command(server.get("command"), "server.command")
-    if server.get("transport", "stdio") != "stdio":
-        raise ManifestError("server.transport must be 'stdio'")
+    transport = server.get("transport", "stdio")
+    if transport not in {"stdio", "streamable-http"}:
+        raise ManifestError("server.transport must be 'stdio' or 'streamable-http'")
+    if transport == "stdio":
+        _command(server.get("command"), "server.command")
+    else:
+        if not isinstance(server.get("url"), str) or not server["url"]:
+            raise ManifestError("server.url is required for streamable-http")
+        _string_map(server.get("headersFromEnv", {}), "server.headersFromEnv")
+        _string_list(
+            server.get("allowedHosts", ["127.0.0.1", "localhost", "::1"]),
+            "server.allowedHosts",
+        )
     if "captureStderr" in server and not isinstance(server["captureStderr"], bool):
         raise ManifestError("server.captureStderr must be a boolean")
     if "restartPerCase" in server and not isinstance(server["restartPerCase"], bool):

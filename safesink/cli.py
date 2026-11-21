@@ -304,6 +304,23 @@ def build_parser(prog: str = "safesink") -> argparse.ArgumentParser:
         help="include a bounded, redacted server stderr excerpt in the report",
     )
     check.add_argument(
+        "--url",
+        help="streamable-HTTP MCP endpoint, instead of a stdio command",
+    )
+    check.add_argument(
+        "--allow-host",
+        action="append",
+        default=[],
+        help="extra host the --url endpoint may use (repeatable)",
+    )
+    check.add_argument(
+        "--header-env",
+        action="append",
+        default=[],
+        metavar="HEADER=ENV_VAR",
+        help="send a header whose value comes from the environment (repeatable)",
+    )
+    check.add_argument(
         "--dry-run",
         action="store_true",
         help="read tools/list and print the plan without calling any tool",
@@ -327,7 +344,7 @@ def build_parser(prog: str = "safesink") -> argparse.ArgumentParser:
     )
     check.add_argument(
         "command",
-        nargs="+",
+        nargs="*",
         help="stdio command that starts the server; place it after ' -- '",
     )
 
@@ -537,7 +554,15 @@ def main(argv: list[str] | None = None, prog: str = "safesink") -> int:
         )
         sandbox.mkdir(parents=True, exist_ok=True)
         manifest_path = Path(arguments.manifest_out or (sandbox / "manifest.json"))
+        if bool(arguments.url) == bool(arguments.command):
+            _die(
+                parser,
+                "mcp-check needs exactly one of --url or a stdio command",
+                hint="for example --url https://example.test/mcp, or -- npx -y server",
+            )
         server_env = _parse_env(parser, arguments.env)
+        header_env = _parse_env(parser, arguments.header_env)
+        allowed_hosts = tuple(arguments.allow_host) or None
         sqlite_queries = _parse_sqlite_queries(parser, arguments.sqlite_query)
         contracts = _parse_contracts(parser, arguments.contract)
         contract_all = (
@@ -559,6 +584,9 @@ def main(argv: list[str] | None = None, prog: str = "safesink") -> int:
                 env=server_env,
                 protocol_version=arguments.protocol_version,
                 startup_timeout_seconds=arguments.startup_timeout,
+                url=arguments.url,
+                headers_from_env=header_env,
+                allowed_hosts=allowed_hosts,
             )
             destructive = sorted(
                 tool["name"] for tool in tools if classify(tool) == "destructive"
@@ -604,6 +632,9 @@ def main(argv: list[str] | None = None, prog: str = "safesink") -> int:
                 dry_run=arguments.dry_run,
                 contracts=contracts,
                 contract_all=contract_all,
+                url=arguments.url,
+                headers_from_env=header_env,
+                allowed_hosts=allowed_hosts,
             )
             write_manifest(manifest, manifest_path)
             if arguments.dry_run:
