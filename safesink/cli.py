@@ -31,6 +31,7 @@ from .mcp_scan import (
     build_manifest,
     classify,
     list_server_tools,
+    scaffold_manifest,
     write_manifest,
 )
 from .mcp_verifier import (
@@ -395,6 +396,33 @@ def build_parser(prog: str = "safesink") -> argparse.ArgumentParser:
         help="stdio command that starts the server; place it after ' -- '",
     )
 
+    init = commands.add_parser(
+        "init",
+        help="scaffold a reviewable manifest from a live server",
+    )
+    init.add_argument(
+        "--server",
+        nargs="+",
+        required=True,
+        metavar="COMMAND",
+        help="stdio command that starts the server",
+    )
+    init.add_argument("--out", default="safesink.mcp.json", help="manifest to write")
+    init.add_argument(
+        "--observer-root",
+        default="./safesink-sandbox",
+        help="sandbox directory the cases observe",
+    )
+    init.add_argument("--cwd", default=".")
+    init.add_argument("--include-destructive", action="store_true")
+    init.add_argument("--inherit-env", nargs="+", default=["HOME"])
+    init.add_argument(
+        "--env", action="append", default=[], metavar="KEY=VALUE",
+        help="environment variable for the server (repeatable)",
+    )
+    init.add_argument("--protocol-version", default="2025-11-25")
+    init.add_argument("--startup-timeout", type=float, default=60.0)
+
     sign = commands.add_parser(
         "sign", help="issue a detached certificate for a report (optionally Ed25519-signed)"
     )
@@ -744,6 +772,58 @@ def main(argv: list[str] | None = None, prog: str = "safesink") -> int:
         if _below_min_score(report, arguments.min_score):
             return 2
         return _exit_code(report)
+
+    if arguments.cmd == "init":
+        observer_root = Path(arguments.observer_root)
+        observer_root.mkdir(parents=True, exist_ok=True)
+        server_env = _parse_env(parser, arguments.env)
+        try:
+            tools, server_info = list_server_tools(
+                arguments.server,
+                cwd=Path(arguments.cwd).resolve(),
+                inherit_env=arguments.inherit_env,
+                env=server_env,
+                protocol_version=arguments.protocol_version,
+                startup_timeout_seconds=arguments.startup_timeout,
+            )
+            manifest = scaffold_manifest(
+                tools,
+                command=arguments.server,
+                observer_root=str(observer_root),
+                cwd=arguments.cwd,
+                include_destructive=arguments.include_destructive,
+                inherit_env=arguments.inherit_env,
+                env=server_env,
+                protocol_version=arguments.protocol_version,
+            )
+        except (ScanError, McpClientError) as error:
+            _die(parser, str(error), hint="the server must speak MCP over stdio")
+            return 2
+        destination = write_manifest(manifest, arguments.out)
+        # Validate before announcing success: a scaffold that cannot be loaded is
+        # worse than no scaffold.
+        try:
+            load_manifest(destination)
+        except ManifestError as error:
+            _die(parser, f"the generated manifest is not valid: {error}")
+            return 2
+        print(
+            json.dumps(
+                {
+                    "server": server_info.get("name"),
+                    "version": server_info.get("version"),
+                    "cases": len(manifest["cases"]),
+                    "todo": manifest["generated"]["todo"],
+                    "manifest": str(destination),
+                    "next": (
+                        "review the cases, fill every empty contract, then run "
+                        f"safesink mcp-verify {destination}"
+                    ),
+                },
+                indent=2,
+            )
+        )
+        return 0
 
     if arguments.cmd == "sign":
         if arguments.keygen:

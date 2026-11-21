@@ -128,6 +128,51 @@ for line in sys.stdin:
         respond(request["id"], {"content": [], "isError": False})
 '''
 
+# One annotated tool and one unannotated tool, for scaffolding review.
+SCAFFOLD_SERVER = '''
+import json, sys
+
+TOOLS = [
+    {
+        "name": "read_note",
+        "annotations": {"readOnlyHint": True},
+        "inputSchema": {
+            "type": "object",
+            "properties": {"path": {"type": "string", "description": "File to read"}},
+            "required": ["path"],
+        },
+    },
+    {
+        "name": "translate_note",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"language": {"type": "string"}},
+            "required": ["language"],
+        },
+    },
+]
+
+
+def respond(request_id, result):
+    sys.stdout.write(json.dumps({"jsonrpc": "2.0", "id": request_id, "result": result}) + "\\n")
+    sys.stdout.flush()
+
+
+for line in sys.stdin:
+    request = json.loads(line)
+    if "id" not in request:
+        continue
+    method = request.get("method")
+    if method == "initialize":
+        respond(request["id"], {
+            "protocolVersion": "2025-11-25",
+            "capabilities": {"tools": {}},
+            "serverInfo": {"name": "scaffold-fixture", "version": "1.0.0"},
+        })
+    elif method == "tools/list":
+        respond(request["id"], {"tools": TOOLS})
+'''
+
 # A server that advertises one read-only tool and one destructive tool, so the
 # destructive-database guard has something to refuse.
 DESTRUCTIVE_DATABASE_SERVER = '''
@@ -746,6 +791,41 @@ class BuildManifestTests(unittest.TestCase):
                 [item["code"] for item in case["violations"]],
             )
             self.assertEqual(exit_code, 2)
+
+    def test_init_writes_a_loadable_scaffold_with_todos(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            server = root / "server.py"
+            server.write_text(SCAFFOLD_SERVER, encoding="utf-8")
+            out = root / "safesink.mcp.json"
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(io.StringIO()):
+                exit_code = cli_main(
+                    [
+                        "init",
+                        "--server",
+                        sys.executable,
+                        str(server),
+                        str(root / "calls.log"),
+                        "--observer-root",
+                        str(root / "sandbox"),
+                        "--out",
+                        str(out),
+                    ]
+                )
+            self.assertEqual(exit_code, 0)
+            manifest = json.loads(out.read_text(encoding="utf-8"))
+            loaded, _ = load_manifest(out)
+            self.assertNotIn("generatedArguments", loaded["cases"][0])
+            by_tool = {case["tool"]: case for case in loaded["cases"]}
+            self.assertEqual(by_tool["read_note"]["contract"], {"readOnlyHint": True})
+            self.assertEqual(by_tool["translate_note"]["contract"], {})
+            self.assertEqual(loaded["generated"]["by"], "safesink init")
+            self.assertEqual(
+                [item["tool"] for item in loaded["generated"]["todo"]],
+                ["translate_note"],
+            )
+            self.assertEqual(manifest["generated"]["todo"][0]["tool"], "translate_note")
 
     def test_dry_run_prints_the_plan_and_calls_nothing(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

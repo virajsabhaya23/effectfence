@@ -649,6 +649,62 @@ def plan_manifest(
     ]
 
 
+def scaffold_manifest(
+    tools: list[dict[str, Any]],
+    *,
+    command: list[str],
+    observer_root: str,
+    cwd: str = ".",
+    include_destructive: bool = False,
+    inherit_env: list[str] | None = None,
+    env: dict[str, str] | None = None,
+    protocol_version: str = "2025-11-25",
+) -> dict[str, Any]:
+    """A hand-editable starting point, not a machine-generated verdict.
+
+    Every generated case is explicit about what a reviewer still has to decide:
+    a tool with no annotations gets an empty ``contract`` placeholder, so loading
+    the manifest and running it cannot silently pass an unchecked tool.
+    """
+    manifest = build_manifest(
+        tools,
+        command=command,
+        observer_root=observer_root,
+        cwd=cwd,
+        include_destructive=include_destructive,
+        inherit_env=inherit_env,
+        env=env,
+        protocol_version=protocol_version,
+    )
+    todo: list[dict[str, str]] = []
+    for tool in tools:
+        name = tool.get("name")
+        if not isinstance(name, str) or not name:
+            continue
+        annotations = tool.get("annotations") or {}
+        if not any(isinstance(annotations.get(hint), bool) for hint in HINT_NAMES):
+            todo.append(
+                {
+                    "tool": name,
+                    "action": (
+                        "the server publishes no annotations: fill the case contract, "
+                        "for example {\"readOnlyHint\": true}, before this case can verify it"
+                    ),
+                }
+            )
+    for case in manifest["cases"]:
+        annotations = next(
+            (tool.get("annotations") or {} for tool in tools if tool.get("name") == case["tool"]),
+            {},
+        )
+        if not any(isinstance(annotations.get(hint), bool) for hint in HINT_NAMES):
+            case["contract"] = {}
+        case.pop("generatedArguments", None)
+    manifest["generated"]["by"] = "safesink init"
+    manifest["generated"]["todo"] = todo
+    return manifest
+
+
 def write_manifest(manifest: dict[str, Any], destination: str | Path) -> Path:
     path = Path(destination)
     path.parent.mkdir(parents=True, exist_ok=True)

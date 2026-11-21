@@ -101,6 +101,19 @@ For a server that needs a curated argument per tool, write a manifest and use
 safesink mcp-verify my-manifest.json --out out/mcp/report.json
 ```
 
+Build that manifest from the live server, then edit it:
+
+```bash
+safesink init --server npx -y @modelcontextprotocol/server-filesystem "$PWD/sandbox" \
+  --observer-root sandbox --out safesink.mcp.json
+```
+
+`init` writes one case per tool, strips the "generated arguments" flag so a
+rejection is a real finding rather than a harness limitation, and gives every
+unannotated tool an empty `contract` placeholder plus a `generated.todo` entry.
+The scaffold is validated before it is written, so it cannot be a manifest that
+silently passes an unchecked tool.
+
 The honest fixture and the deliberately dishonest one show both outcomes:
 
 ```bash
