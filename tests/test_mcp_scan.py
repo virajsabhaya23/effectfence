@@ -86,6 +86,48 @@ for line in sys.stdin:
         })
 '''
 
+# Records every tools/call, so a dry run can be proven to make none.
+DRY_RUN_SERVER = '''
+import json, sys
+
+LOG = sys.argv[1]
+TOOLS = [
+    {
+        "name": "read_note",
+        "annotations": {"readOnlyHint": True},
+        "inputSchema": {
+            "type": "object",
+            "properties": {"path": {"type": "string", "description": "File to read"}},
+            "required": ["path"],
+        },
+    }
+]
+
+
+def respond(request_id, result):
+    sys.stdout.write(json.dumps({"jsonrpc": "2.0", "id": request_id, "result": result}) + "\\n")
+    sys.stdout.flush()
+
+
+for line in sys.stdin:
+    request = json.loads(line)
+    if "id" not in request:
+        continue
+    method = request.get("method")
+    if method == "initialize":
+        respond(request["id"], {
+            "protocolVersion": "2025-11-25",
+            "capabilities": {"tools": {}},
+            "serverInfo": {"name": "dry-run-fixture", "version": "1.0.0"},
+        })
+    elif method == "tools/list":
+        respond(request["id"], {"tools": TOOLS})
+    elif method == "tools/call":
+        with open(LOG, "a", encoding="utf-8") as handle:
+            handle.write("called\\n")
+        respond(request["id"], {"content": [], "isError": False})
+'''
+
 # A server that advertises one read-only tool and one destructive tool, so the
 # destructive-database guard has something to refuse.
 DESTRUCTIVE_DATABASE_SERVER = '''
@@ -618,6 +660,70 @@ class BuildManifestTests(unittest.TestCase):
             ]
             self.assertIn("READ_ONLY_HINT_MISMATCH", codes)
             self.assertEqual(exit_code, 2)
+
+    def test_dry_run_prints_the_plan_and_calls_nothing(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            calls = root / "calls.log"
+            server = root / "server.py"
+            server.write_text(DRY_RUN_SERVER, encoding="utf-8")
+            manifest_path = root / "manifest.json"
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(
+                io.StringIO()
+            ):
+                exit_code = cli_main(
+                    [
+                        "mcp-check",
+                        "--sandbox",
+                        str(root / "sandbox"),
+                        "--out",
+                        str(manifest_path),
+                        "--dry-run",
+                        "--",
+                        sys.executable,
+                        str(server),
+                        str(calls),
+                    ]
+                )
+            self.assertEqual(exit_code, 0)
+            self.assertFalse(calls.exists())
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            plan = manifest["generated"]["plan"]
+            self.assertEqual([item["tool"] for item in plan], ["read_note"])
+            self.assertTrue(plan[0]["arguments"]["path"].endswith(".txt"))
+            self.assertEqual(plan[0]["observers"], ["sandbox"])
+            loaded, _ = load_manifest(manifest_path)
+            self.assertEqual(loaded["cases"][0]["tool"], "read_note")
+
+    def test_dry_run_does_not_require_the_sqlite_database_to_exist(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            server = root / "server.py"
+            server.write_text(DRY_RUN_SERVER, encoding="utf-8")
+            manifest_path = root / "manifest.json"
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(
+                io.StringIO()
+            ):
+                exit_code = cli_main(
+                    [
+                        "mcp-check",
+                        "--out",
+                        str(manifest_path),
+                        "--sqlite-query",
+                        f"{root / 'missing.db'}=select 1",
+                        "--dry-run",
+                        "--",
+                        sys.executable,
+                        str(server),
+                        str(root / "calls.log"),
+                    ]
+                )
+            self.assertEqual(exit_code, 0)
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            self.assertEqual(
+                [observer["kind"] for observer in manifest["observers"]],
+                ["sqlite-query"],
+            )
 
     def test_include_destructive_refuses_a_real_database_without_a_sandbox(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
