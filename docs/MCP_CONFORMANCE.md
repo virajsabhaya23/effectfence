@@ -34,6 +34,12 @@ Observer ids come from the file name (`state.db` becomes `sqlite-state`), and th
 manifest stores an absolute database path so it survives being written into a
 temporary sandbox.
 
+Because that database is real user data, `--include-destructive` is refused when
+`--sqlite-query` replaces the sandbox observer: mutating it would destroy what
+the run is supposed to measure. The error names every database that would be
+touched. Pass `--allow-unobserved-mutations` to accept that, or copy the database
+and point the server at the copy.
+
 With a hand-written manifest:
 
 ```bash

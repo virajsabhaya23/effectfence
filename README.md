@@ -203,6 +203,11 @@ marks unverifiable cases as `skipped`, not failed, matching the verdicts above.
 - `mcp-check` only ever mutates the sandbox directory you give it, and skips
   tools that declare themselves destructive unless you pass
   `--include-destructive`.
+- The exception is a database observed with `--sqlite-query`: without a
+  filesystem sandbox observer, that database is your real data, so
+  `--include-destructive` refuses to run until you also pass
+  `--allow-unobserved-mutations`. The refusal names every database that would be
+  mutated. Point the server at a disposable copy instead when you can.
 - Only configured observers define the observable boundary. Snapshot comparison
   cannot detect unobserved side effects, and it cannot prove that an external
   read occurred.

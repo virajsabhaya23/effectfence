@@ -10,7 +10,13 @@ from pathlib import Path
 from . import __version__
 from .mcp_client import McpClientError
 from .mcp_reports import write_json_report, write_junit_report, write_sarif_report
-from .mcp_scan import ScanError, build_manifest, list_server_tools, write_manifest
+from .mcp_scan import (
+    ScanError,
+    build_manifest,
+    classify,
+    list_server_tools,
+    write_manifest,
+)
 from .mcp_verifier import ManifestError, verify_manifest
 
 
@@ -103,6 +109,14 @@ def build_parser(prog: str = "safesink") -> argparse.ArgumentParser:
         "--sandbox-observer",
         action="store_true",
         help="also hash the sandbox directory when --sqlite-query is used",
+    )
+    check.add_argument(
+        "--allow-unobserved-mutations",
+        action="store_true",
+        help=(
+            "allow --include-destructive to call destructive tools when the only "
+            "observed boundary is a real database"
+        ),
     )
     check.add_argument("--protocol-version", default="2025-11-25")
     check.add_argument("--startup-timeout", type=float, default=60.0)
@@ -203,6 +217,34 @@ def main(argv: list[str] | None = None, prog: str = "safesink") -> int:
                 protocol_version=arguments.protocol_version,
                 startup_timeout_seconds=arguments.startup_timeout,
             )
+            destructive = sorted(
+                tool["name"] for tool in tools if classify(tool) == "destructive"
+            )
+            # A seeded database is real user data. Watching it is not the same as
+            # being allowed to mutate it: the sandbox is disposable, orders.db is
+            # not. Refuse rather than report a deletion we caused ourselves.
+            if (
+                destructive
+                and arguments.include_destructive
+                and sqlite_queries
+                and not arguments.sandbox_observer
+                and not arguments.allow_unobserved_mutations
+            ):
+                databases = ", ".join(
+                    str(Path(database).expanduser().resolve())
+                    for database, _ in sqlite_queries
+                )
+                _die(
+                    parser,
+                    "refusing to call destructive tools against a real database",
+                    hint=(
+                        f"no filesystem sandbox observer is configured, so "
+                        f"{', '.join(destructive)} would mutate: {databases}. "
+                        "Pass --allow-unobserved-mutations if that is intended, or add "
+                        "--sandbox-observer and point the server at a disposable copy."
+                    ),
+                )
+                return 2
             manifest = build_manifest(
                 tools,
                 command=arguments.command,
