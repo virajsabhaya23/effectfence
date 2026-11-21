@@ -361,6 +361,17 @@ measure corpus authoring, not detection of real systems).
 The deprecated `effectfence` import path and console script still work and
 forward to `safesink`.
 
+## Container
+
+```bash
+docker run --rm -v "$PWD:/work" ghcr.io/virajsabhaya23/effectfence \
+  mcp-verify manifest.json --out /out/report.json
+```
+
+Runs unprivileged and includes Node for `npx`-based servers.
+[`docs/CONTAINER.md`](docs/CONTAINER.md) shows how to bound an untrusted server
+with no network, a read-only root and a throwaway sandbox.
+
 ## Use it from an agent
 
 ```bash
