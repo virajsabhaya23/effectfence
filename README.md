@@ -367,6 +367,14 @@ measure corpus authoring, not detection of real systems).
 The deprecated `effectfence` import path and console script still work and
 forward to `safesink`.
 
+## Protocol support
+
+SafeSink speaks the current stateless MCP revision (`2026-07-28`) and the older
+`initialize` handshake. With `"protocolVersion": "auto"` (the default) it probes
+`server/discover`, negotiates a common version, and falls back to the handshake
+for servers that predate the change - including streamable HTTP, where the probe
+and headers differ. See [docs/MCP_CONFORMANCE.md](docs/MCP_CONFORMANCE.md).
+
 ## GitHub Actions
 
 ```yaml

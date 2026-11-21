@@ -396,7 +396,7 @@ def list_server_tools(
     cwd: Path,
     inherit_env: list[str] | None = None,
     env: dict[str, str] | None = None,
-    protocol_version: str = "2025-11-25",
+    protocol_version: str = "auto",
     startup_timeout_seconds: float = 60.0,
     request_timeout_seconds: float = 60.0,
     url: str | None = None,
@@ -456,7 +456,7 @@ def build_manifest(
     minimum_tool_coverage: float = 0.0,
     inherit_env: list[str] | None = None,
     env: dict[str, str] | None = None,
-    protocol_version: str = "2025-11-25",
+    protocol_version: str = "auto",
     sqlite_queries: list[tuple[str, str]] | None = None,
     include_sandbox_observer: bool = False,
     capture_stderr: bool = False,
@@ -658,7 +658,7 @@ def scaffold_manifest(
     include_destructive: bool = False,
     inherit_env: list[str] | None = None,
     env: dict[str, str] | None = None,
-    protocol_version: str = "2025-11-25",
+    protocol_version: str = "auto",
 ) -> dict[str, Any]:
     """A hand-editable starting point, not a machine-generated verdict.
 

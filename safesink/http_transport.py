@@ -20,7 +20,17 @@ import urllib.parse
 import urllib.request
 from typing import Any
 
-from .mcp_client import McpClientError
+from .mcp_client import McpClientError, McpProtocolError
+from .mcp_protocol import (
+    SUPPORTED_PROTOCOL_VERSIONS,
+    UNSUPPORTED_PROTOCOL_VERSION,
+    is_modern_version,
+    modern_meta,
+    pick_common_version,
+    server_info as _server_info,
+    wants_modern,
+    with_meta,
+)
 
 
 def _client_version() -> str:
@@ -43,7 +53,7 @@ class McpHttpClient:
         *,
         headers_from_env: dict[str, str] | None = None,
         allowed_hosts: tuple[str, ...] = ("127.0.0.1", "localhost", "::1"),
-        protocol_version: str = "2025-11-25",
+        protocol_version: str = "auto",
         timeout_seconds: float = 30.0,
         startup_timeout_seconds: float = 15.0,
         max_response_bytes: int = 8 * 1024 * 1024,
@@ -68,6 +78,8 @@ class McpHttpClient:
         self.server_capabilities: dict[str, Any] = {}
         self.negotiated_protocol_version = ""
         self.session_id: str | None = None
+        self.era = "legacy"
+        self._header_version = SUPPORTED_PROTOCOL_VERSIONS[-1]
         self._next_id = 1
 
     # The verifier reads these off every client, including the stdio one.
@@ -82,12 +94,19 @@ class McpHttpClient:
     def __exit__(self, *_: Any) -> None:
         self.close()
 
-    def _headers(self) -> dict[str, str]:
+    def _headers(self, method: str = "", tool_name: str = "") -> dict[str, str]:
         headers = {
             "Content-Type": "application/json",
             "Accept": "application/json, text/event-stream",
-            "MCP-Protocol-Version": self.protocol_version,
+            "MCP-Protocol-Version": (
+                self.negotiated_protocol_version or self._header_version
+            ),
         }
+        if self.era == "modern":
+            # 2026-07-28 requires the method, and the tool name for tools/call.
+            headers["Mcp-Method"] = method
+            if tool_name:
+                headers["Mcp-Name"] = tool_name
         if self.session_id:
             headers["Mcp-Session-Id"] = self.session_id
         for header, variable in self.headers_from_env.items():
@@ -99,12 +118,17 @@ class McpHttpClient:
         return headers
 
     def _post(
-        self, payload: dict[str, Any], *, timeout_seconds: float | None = None
+        self,
+        payload: dict[str, Any],
+        *,
+        timeout_seconds: float | None = None,
+        method: str = "",
+        tool_name: str = "",
     ) -> tuple[int, dict[str, str], bytes]:
         request = urllib.request.Request(
             self.url,
             data=json.dumps(payload, separators=(",", ":")).encode("utf-8"),
-            headers=self._headers(),
+            headers=self._headers(method, tool_name),
             method="POST",
         )
         opener = urllib.request.build_opener(_NoRedirect())
@@ -120,35 +144,96 @@ class McpHttpClient:
                 raise McpClientError(
                     "MCP HTTP server returned 401; supply the token through headersFromEnv"
                 ) from error
-            raise McpClientError(
-                f"MCP HTTP server returned {error.code}; body omitted from report"
-            ) from error
+            # 400 is how a legacy server answers a modern probe, so the body has
+            # to be inspectable instead of fatal.
+            try:
+                body = error.read(self.max_response_bytes + 1)
+            except OSError:
+                body = b""
+            return error.code, dict(error.headers or {}), body
         except urllib.error.URLError as error:
             raise McpClientError(
                 f"MCP HTTP request failed ({error.__class__.__name__}; details omitted)"
             ) from error
 
     def start(self) -> None:
-        status, headers, body = self._post(
+        if not self._start_modern():
+            self._start_legacy()
+
+    def _start_modern(self) -> bool:
+        """Probe with server/discover; a legacy server falls back to initialize."""
+        if not wants_modern(self.protocol_version):
+            return False
+        preferred = (
+            self.protocol_version
+            if is_modern_version(self.protocol_version)
+            else SUPPORTED_PROTOCOL_VERSIONS[0]
+        )
+        self._header_version = preferred
+        try:
+            result = self._discover(preferred)
+        except McpProtocolError as error:
+            corrected = self._retry_discover(error, preferred)
+            if corrected is None:
+                return False
+            result, preferred = corrected
+        except McpClientError:
+            return False
+        if not isinstance(result, dict):
+            return False
+        chosen = pick_common_version(result.get("supportedVersions"), preferred)
+        if chosen is None or not is_modern_version(chosen):
+            return False
+        if chosen != preferred:
+            try:
+                result = self._discover(chosen)
+            except McpClientError:
+                return False
+            if not isinstance(result, dict):
+                return False
+        self.era = "modern"
+        self._header_version = chosen
+        self.negotiated_protocol_version = chosen
+        self.server_info = _server_info(result)
+        capabilities = result.get("capabilities")
+        self.server_capabilities = capabilities if isinstance(capabilities, dict) else {}
+        return True
+
+    def _retry_discover(
+        self, error: McpProtocolError, preferred: str
+    ) -> tuple[Any, str] | None:
+        if error.code != UNSUPPORTED_PROTOCOL_VERSION:
+            return None
+        chosen = pick_common_version(error.data.get("supported"), preferred)
+        if chosen is None or not is_modern_version(chosen):
+            return None
+        self._header_version = chosen
+        try:
+            return self._discover(chosen), chosen
+        except McpClientError:
+            return None
+
+    def _discover(self, version: str) -> Any:
+        return self._exchange(
+            "server/discover",
+            {"_meta": modern_meta(version, _client_version())},
+            timeout_seconds=self.startup_timeout_seconds,
+        )
+
+    def _start_legacy(self) -> None:
+        self.era = "legacy"
+        self._header_version = SUPPORTED_PROTOCOL_VERSIONS[-1]
+        result = self._exchange(
+            "initialize",
             {
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "initialize",
-                "params": {
-                    "protocolVersion": self.protocol_version,
-                    "capabilities": {},
-                    "clientInfo": {"name": "safesink", "version": _client_version()},
-                },
+                "protocolVersion": SUPPORTED_PROTOCOL_VERSIONS[-1]
+                if wants_modern(self.protocol_version)
+                else self.protocol_version,
+                "capabilities": {},
+                "clientInfo": {"name": "safesink", "version": _client_version()},
             },
             timeout_seconds=self.startup_timeout_seconds,
         )
-        self._next_id = 2
-        session = {
-            key.lower(): value for key, value in headers.items()
-        }.get("mcp-session-id")
-        if session:
-            self.session_id = session
-        result = _result_from_body(body, headers, expected_id=1, status=status)
         if not isinstance(result, dict):
             raise McpClientError("MCP HTTP initialize result must be an object")
         self.negotiated_protocol_version = str(result.get("protocolVersion", ""))
@@ -158,7 +243,10 @@ class McpHttpClient:
         self.server_capabilities = capabilities if isinstance(capabilities, dict) else {}
         # A notification has no id and the server normally answers 202.
         try:
-            self._post({"jsonrpc": "2.0", "method": "notifications/initialized"})
+            self._post(
+                {"jsonrpc": "2.0", "method": "notifications/initialized"},
+                method="notifications/initialized",
+            )
         except McpClientError:
             pass
 
@@ -169,6 +257,26 @@ class McpHttpClient:
         *,
         timeout_seconds: float | None = None,
     ) -> Any:
+        if self.era == "modern":
+            params = with_meta(
+                params, self.negotiated_protocol_version, _client_version()
+            )
+            tool_name = ""
+            if method == "tools/call" and isinstance(params.get("name"), str):
+                tool_name = params["name"]
+            return self._exchange(
+                method, params, timeout_seconds=timeout_seconds, tool_name=tool_name
+            )
+        return self._exchange(method, params, timeout_seconds=timeout_seconds)
+
+    def _exchange(
+        self,
+        method: str,
+        params: dict[str, Any] | None,
+        *,
+        timeout_seconds: float | None = None,
+        tool_name: str = "",
+    ) -> Any:
         request_id = self._next_id
         self._next_id += 1
         payload: dict[str, Any] = {
@@ -178,7 +286,18 @@ class McpHttpClient:
         }
         if params is not None:
             payload["params"] = params
-        status, headers, body = self._post(payload, timeout_seconds=timeout_seconds)
+        status, headers, body = self._post(
+            payload,
+            timeout_seconds=timeout_seconds,
+            method=method,
+            tool_name=tool_name,
+        )
+        if self.era == "legacy":
+            session = {
+                key.lower(): value for key, value in headers.items()
+            }.get("mcp-session-id")
+            if session:
+                self.session_id = session
         return _result_from_body(body, headers, expected_id=request_id, status=status)
 
     def list_tools(self, *, max_pages: int = 100) -> list[dict[str, Any]]:
@@ -272,8 +391,14 @@ def _result_from_body(
         raise McpClientError("MCP HTTP response has invalid jsonrpc version")
     if "error" in message:
         error_value = message["error"]
-        code = error_value.get("code", "unknown") if isinstance(error_value, dict) else "unknown"
-        raise McpClientError(f"MCP error {code}; server-provided message omitted from report")
+        if isinstance(error_value, dict):
+            code = error_value.get("code", "unknown")
+            raise McpProtocolError(
+                code,
+                error_value.get("data"),
+                f"MCP error {code}; server-provided message omitted from report",
+            )
+        raise McpClientError("MCP error; server-provided value omitted from report")
     if "result" not in message:
         raise McpClientError("MCP HTTP response contains neither result nor error")
     return message["result"]
