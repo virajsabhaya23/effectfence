@@ -9,10 +9,13 @@ from pathlib import Path
 
 from safesink.cli import main as cli_main
 from safesink.mcp_scan import (
+    PROBE_COPY_NAME,
+    PROBE_FILE_NAME,
     PROBE_SQL,
     PROBE_STRING,
     PROBE_URL,
     ScanError,
+    _role,
     build_manifest,
     classify,
     synthesize_arguments,
@@ -208,6 +211,26 @@ class SynthesizeArgumentTests(unittest.TestCase):
         )
         for name in ("profile_id", "target_language", "source_language", "target_audience"):
             self.assertEqual(arguments[name], PROBE_STRING)
+
+    def test_short_role_words_do_not_create_destinations(self) -> None:
+        for name in ("token_file", "timeout_path", "total", "timestamp_path"):
+            self.assertEqual(_role(name), "read", name)
+
+    def test_explicit_destination_words_are_write_roles(self) -> None:
+        for name in ("output_path", "destination", "dest_file", "target", "to"):
+            self.assertEqual(_role(name), "write", name)
+
+    def test_path_argument_with_an_incidental_role_substring_reads_the_seed(self) -> None:
+        schema = {
+            "type": "object",
+            "properties": {"token_file": {"type": "string"}},
+            "required": ["token_file"],
+        }
+        arguments = synthesize_arguments(
+            schema, sandbox="/sandbox", tool_name="inspect_token"
+        )
+        self.assertEqual(arguments["token_file"], f"/sandbox/{PROBE_FILE_NAME}")
+        self.assertNotEqual(arguments["token_file"], f"/sandbox/{PROBE_COPY_NAME}")
 
     def test_camel_case_path_names_still_resolve_into_the_sandbox(self) -> None:
         schema = {
